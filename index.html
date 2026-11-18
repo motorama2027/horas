@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control de horas</title>
+  <meta name="theme-color" content="#1f3a5f">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ========== LOGIN ========== -->
+  <section id="vista-login" class="login" hidden>
+    <form id="form-login" class="login-card" autocomplete="on">
+      <div class="marca"><span class="marca-punto"></span><span id="login-empresa">Control de horas</span></div>
+      <h1 id="login-titulo">Entrar</h1>
+      <p id="login-sub" class="muted">Introduce el usuario y la contraseña que te ha dado tu responsable.</p>
+      <label for="login-usuario">Usuario</label>
+      <input id="login-usuario" name="username" autocomplete="username" required autocapitalize="none" spellcheck="false">
+      <div id="login-nombre-wrap" hidden>
+        <label for="login-nombre">Tu nombre</label>
+        <input id="login-nombre" autocomplete="name">
+      </div>
+      <label for="login-pass">Contraseña</label>
+      <input id="login-pass" type="password" name="password" autocomplete="current-password" required minlength="6">
+      <button id="login-btn" class="btn btn-primario" type="submit">Entrar</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <!-- ========== APP ========== -->
+  <div id="vista-app" class="app" hidden>
+    <header class="cabecera">
+      <div class="marca"><span class="marca-punto"></span><span id="cab-empresa">Control de horas</span></div>
+      <nav id="nav" class="nav" aria-label="Secciones"></nav>
+      <div class="cab-usuario">
+        <span id="cab-nombre"></span>
+        <button id="btn-salir" class="btn btn-fantasma btn-sm" type="button">Salir</button>
+      </div>
+    </header>
+    <main id="contenido" class="contenido"></main>
+  </div>
+
+  <!-- ========== MODAL ========== -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-fondo" data-cerrar></div>
+    <div class="modal-caja" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+      <div class="modal-cab">
+        <h2 id="modal-titulo"></h2>
+        <button class="btn btn-fantasma btn-sm" type="button" data-cerrar aria-label="Cerrar">✕</button>
+      </div>
+      <div id="modal-cuerpo"></div>
+    </div>
+  </div>
+
+  <div id="aviso" class="aviso" role="status" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
