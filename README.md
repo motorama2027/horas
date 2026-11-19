@@ -54,13 +54,13 @@ Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, ho
 | Trabajador | **Calendario** → en cada día escribe el cliente y el tiempo; **+ Añadir cliente** para el siguiente. Se guarda solo. Arriba ve sus horas, el contrato, las extras y el importe. |
 | Master | **Calendario** → elige la persona en el desplegable para ver o corregir sus horas. |
 | Master | **Informes semanales** → «Semana pasada» para el informe de lunes a domingo cerrado. Flechas para ir a otras semanas. «Descargar Excel» o «Imprimir / PDF». |
-| Master | **Clientes** → ficha de cada cliente, horas y visitas del mes, lo cobrado y quién ha ido. «Descargar Excel del mes». |
+| Master | **Clientes y facturación** → ficha de cada cliente con su **tarifa** (por hora o por servicio, solo la ves tú). Por mes: horas, visitas, **a facturar**, cobrado en mano, **pendiente**, **coste** de las trabajadoras y **margen**. «Descargar Excel del mes» (resumen + detalle por cliente). |
 | Master | **Informes semanales** → en la ficha de cada una: anticipos, observaciones y fecha de entrega. **Descargar Excel** → hoja vertical por semana (salmón/verde alternando), como la de papel. |
 | Master | **Usuarios** → pulsa una fila para editar la ficha, desactivar a alguien (no puede entrar pero conserva su historial) o hacerlo master. |
 
 ## Actualizar la base de datos
 
-Si cambia `supabase/schema.sql`, vuelve a pegarlo entero en **SQL Editor** y pulsa **Run**. Se puede ejecutar las veces que haga falta: no borra datos.
+Si ya tenías la app funcionando, ejecuta solo los archivos `supabase/actualizacion*.sql` que no hayas ejecutado. Si empiezas de cero, `supabase/schema.sql` lo tiene todo. También puedes volver a pegar `schema.sql` entero en **SQL Editor** y pulsa **Run**. Se puede ejecutar las veces que haga falta: no borra datos.
 
 ## Preguntas frecuentes
 
