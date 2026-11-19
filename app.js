@@ -1606,9 +1606,10 @@
     const vertical = hojas[0]?.pageSetup?.orientation !== "landscape";
     const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${esc(nombre.replace(/\.xlsx$/, ""))}</title>
       <style>
-        @page { size: A4 ${vertical ? "portrait" : "landscape"}; margin: 10mm; }
+        @page { size: A4 ${vertical ? "portrait" : "landscape"}; margin: 8mm; }
         * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-        html, body { margin: 0; background: #fff; color: #111; font-family: Calibri, "Segoe UI", Arial, sans-serif; }
+        html, body { margin: 0; padding: 0; width: 100%; background: #fff; color: #111; font-family: Calibri, "Segoe UI", Arial, sans-serif; }
+        @media screen { body { max-width: ${vertical ? "194mm" : "281mm"}; margin: 0 auto; padding: 8mm 0; } }
         .hoja { width: 100%; page-break-after: always; break-after: page; }
         .hoja:last-child { page-break-after: auto; break-after: auto; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11.5px; }
@@ -1616,9 +1617,19 @@
         table.con-rejilla td { border: 1px solid #e3e6ea; }
         tr { page-break-inside: avoid; }
       </style></head><body>${hojas.map((ws) => renderHoja(ws, true)).join("")}</body></html>`;
+    // Se imprime desde una ventana propia con el tamaño de un A4: así ningún navegador desplaza ni corta la hoja
+    const w = window.open("", "_blank", "width=900,height=1100");
+    if (w) {
+      w.document.open(); w.document.write(html); w.document.close();
+      const lanzar = () => { try { w.focus(); w.print(); } catch (e) { aviso("No se pudo abrir la impresión: " + e.message, true); } };
+      w.onafterprint = () => setTimeout(() => w.close(), 300);
+      if (w.document.readyState === "complete") setTimeout(lanzar, 300); else w.onload = () => setTimeout(lanzar, 200);
+      return;
+    }
+    // Si el navegador bloquea la ventana: marco oculto con tamaño de A4
     const ifr = document.createElement("iframe");
     ifr.setAttribute("aria-hidden", "true");
-    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    ifr.style.cssText = `position:fixed;left:-400mm;top:0;width:${vertical ? "210mm" : "297mm"};height:${vertical ? "297mm" : "210mm"};border:0`;
     document.body.appendChild(ifr);
     const doc = ifr.contentWindow.document;
     doc.open(); doc.write(html); doc.close();
