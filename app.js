@@ -230,9 +230,29 @@
   }
 
   async function cargarPerfiles() {
-    const { data, error } = await sb.from("perfiles").select("*").order("nombre");
+    const [{ data, error }, { data: cons }] = await Promise.all([
+      sb.from("perfiles").select("*").order("nombre"),
+      sb.from("contratos").select("*"),   // horas de contrato: solo las puede leer el master
+    ]);
     if (error) return aviso(errorTxt(error), true);
+    const horas = new Map((cons || []).map((c) => [c.usuario_id, Number(c.horas_semanales) || 0]));
+    data.forEach((p) => (p.horas_semanales = horas.get(p.id) ?? 0));
     estado.perfiles = data;
+    if (estado.yo) { const yo = data.find((p) => p.id === estado.yo.id); if (yo) estado.yo.horas_semanales = yo.horas_semanales; }
+  }
+
+  // Guarda una ficha: las horas de contrato van a su tabla privada, el resto a «perfiles»
+  async function guardarPerfil(id, v) {
+    const { horas_semanales, ...resto } = v;
+    if (Object.keys(resto).length) {
+      const { error } = await sb.from("perfiles").update(resto).eq("id", id);
+      if (error) return error;
+    }
+    if (horas_semanales !== undefined) {
+      const { error } = await sb.from("contratos").upsert({ usuario_id: id, horas_semanales }, { onConflict: "usuario_id" });
+      if (error) return error;
+    }
+    return null;
   }
 
   function secciones() {
@@ -513,6 +533,12 @@
       c.querySelector(".dia-total").innerHTML = m ? fmtMin(m) + " h" : '<span class="cero">0:00 h</span>';
     });
     const c = cuentas(total, perfilCal(), cobrado, estado.anticiposSemana || 0);
+    if (!estado.yo.es_admin) {
+      $("#sem-pie").innerHTML = `
+      <div><span class="etq">Horas hechas</span><span class="val num">${fmtH(c.horas)}</span><span class="sub">esta semana</span></div>
+      <div><span class="etq">Cobrado en casas</span><span class="val num">${eur(c.cobrado)}</span><span class="sub">esta semana</span></div>`;
+      return;
+    }
     $("#sem-pie").innerHTML = `
       <div><span class="etq">Horas hechas</span><span class="val num">${fmtH(c.horas)}</span><span class="sub">contrato ${fmtH(c.contrato)}</span></div>
       <div><span class="etq">${c.dif >= 0 ? "Horas extra" : "Faltan"}</span><span class="val num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(c.dif >= 0 ? c.extra : c.faltan)}</span><span class="sub">× ${eur(c.precio)} = ${eur(c.importe)}</span></div>
@@ -526,9 +552,8 @@
       <div class="rejilla">
         <div><label for="f-nombre">Nombre</label><input id="f-nombre" value="${esc(p.nombre)}" ${ro}></div>
         <div><label for="f-apellidos">Apellidos</label><input id="f-apellidos" value="${esc(p.apellidos)}" ${ro}></div>
-        <div><label for="f-dni">DNI / NIE</label><input id="f-dni" value="${esc(p.dni)}" ${ro}></div>
         <div><label for="f-puesto">Puesto</label><input id="f-puesto" value="${esc(p.puesto)}" ${ro}></div>
-        <div><label for="f-horas">Horas de contrato por semana</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}" ${ro}></div>
+        ${admin ? `<div><label for="f-horas">Horas de contrato por semana</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}"></div>` : ""}
         <div><label for="f-precio">Precio por hora (€)</label><input id="f-precio" type="number" min="0" max="200" step="0.5" value="${Number(p.precio_hora ?? 8)}" ${ro}></div>
         ${admin ? `<div class="ancho"><label for="f-notas">Notas internas (solo las ve el master)</label><textarea id="f-notas">${esc(p.notas)}</textarea></div>` : ""}
       </div>`;
@@ -536,7 +561,7 @@
   function leerFicha(admin) {
     const v = {};
     if (admin) Object.assign(v, {
-      nombre: $("#f-nombre").value.trim(), apellidos: $("#f-apellidos").value.trim(), dni: $("#f-dni").value.trim(),
+      nombre: $("#f-nombre").value.trim(), apellidos: $("#f-apellidos").value.trim(),
       puesto: $("#f-puesto").value.trim(), horas_semanales: Number($("#f-horas").value) || 0,
       precio_hora: Number($("#f-precio").value) || 0,
       notas: $("#f-notas").value,
@@ -566,11 +591,12 @@
       e.preventDefault();
       if (!yo.es_admin) return;
       const v = leerFicha(true);
-      const { data, error } = await sb.from("perfiles").update(v).eq("id", yo.id).select().single();
-      if (error) return aviso(errorTxt(error), true);
-      estado.yo = data;
-      if (yo.es_admin) await cargarPerfiles();
-      $("#cab-nombre").textContent = nombreDe(data) + (data.es_admin ? " · master" : "");
+      const err = await guardarPerfil(yo.id, v);
+      if (err) return aviso(errorTxt(err), true);
+      const { data } = await sb.from("perfiles").select("*").eq("id", yo.id).single();
+      if (data) estado.yo = data;
+      await cargarPerfiles();
+      $("#cab-nombre").textContent = nombreDe(estado.yo) + " · master";
       aviso("Ficha guardada");
     };
     $("#form-pass").onsubmit = async (e) => {
@@ -638,13 +664,12 @@
         if (error) throw error;
         if (!data.user || (data.user.identities && data.user.identities.length === 0)) throw new Error("Ese nombre de usuario ya existe.");
         await sbAlta.auth.signOut().catch(() => {});
-        const { error: e2 } = await sb.from("perfiles").update({
+        const e2 = await guardarPerfil(data.user.id, {
           activo: true,
           nombre: $("#n-nombre").value.trim(), apellidos: $("#n-apellidos").value.trim(),
           puesto: $("#n-puesto").value.trim(), horas_semanales: Number($("#n-horas").value) || 0,
           precio_hora: Number($("#n-precio").value) || 0,
-
-        }).eq("id", data.user.id);
+        });
         if (e2) throw e2;
         cerrarModal(); aviso(`Usuario «${usuario}» creado`); vistaUsuarios();
       } catch (err) {
@@ -683,9 +708,9 @@
       e.preventDefault();
       const v = leerFicha(true);
       if (!soyYo) { v.activo = $("#u-activo").value === "1"; v.es_admin = $("#u-admin").value === "1"; }
-      const { error } = await sb.from("perfiles").update(v).eq("id", p.id);
+      const error = await guardarPerfil(p.id, v);
       if (error) return ($("#u-error").textContent = errorTxt(error));
-      if (soyYo) { const { data } = await sb.from("perfiles").select("*").eq("id", p.id).single(); if (data) estado.yo = data; }
+      if (soyYo) { const { data } = await sb.from("perfiles").select("*").eq("id", p.id).single(); if (data) estado.yo = data; await cargarPerfiles(); }
       cerrarModal(); aviso("Ficha guardada"); vistaUsuarios();
     };
   }
