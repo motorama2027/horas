@@ -530,20 +530,16 @@
         <div><label for="f-puesto">Puesto</label><input id="f-puesto" value="${esc(p.puesto)}" ${ro}></div>
         <div><label for="f-horas">Horas de contrato por semana</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}" ${ro}></div>
         <div><label for="f-precio">Precio por hora (€)</label><input id="f-precio" type="number" min="0" max="200" step="0.5" value="${Number(p.precio_hora ?? 8)}" ${ro}></div>
-        <div><label for="f-alta">Fecha de alta</label><input id="f-alta" type="date" value="${esc(p.fecha_alta)}" ${ro}></div>
-        <div><label for="f-tel">Teléfono</label><input id="f-tel" type="tel" value="${esc(p.telefono)}"></div>
-        <div><label for="f-email">Email de contacto</label><input id="f-email" type="email" value="${esc(p.email_contacto)}"></div>
-        <div class="ancho"><label for="f-dir">Dirección</label><input id="f-dir" value="${esc(p.direccion)}"></div>
         ${admin ? `<div class="ancho"><label for="f-notas">Notas internas (solo las ve el master)</label><textarea id="f-notas">${esc(p.notas)}</textarea></div>` : ""}
       </div>`;
   }
   function leerFicha(admin) {
-    const v = { telefono: $("#f-tel").value.trim(), email_contacto: $("#f-email").value.trim(), direccion: $("#f-dir").value.trim() };
+    const v = {};
     if (admin) Object.assign(v, {
       nombre: $("#f-nombre").value.trim(), apellidos: $("#f-apellidos").value.trim(), dni: $("#f-dni").value.trim(),
       puesto: $("#f-puesto").value.trim(), horas_semanales: Number($("#f-horas").value) || 0,
       precio_hora: Number($("#f-precio").value) || 0,
-      fecha_alta: $("#f-alta").value || null, notas: $("#f-notas").value,
+      notas: $("#f-notas").value,
     });
     return v;
   }
@@ -553,9 +549,9 @@
     $("#contenido").innerHTML = `
       <section class="tarjeta">
         <h2>Mi ficha personal</h2>
-        <p class="muted" style="margin:0">Usuario: <b>${esc(yo.usuario)}</b>${yo.es_admin ? "" : " · Los datos del contrato los mantiene tu responsable; tú puedes cambiar tus datos de contacto."}</p>
+        <p class="muted" style="margin:0">Usuario: <b>${esc(yo.usuario)}</b>${yo.es_admin ? "" : " · Tu ficha la mantiene tu responsable. Si algún dato no es correcto, díselo."}</p>
         <form id="form-ficha">${camposFicha(yo, yo.es_admin)}
-          <div class="acciones"><button class="btn btn-primario" type="submit">Guardar ficha</button></div>
+          ${yo.es_admin ? `<div class="acciones"><button class="btn btn-primario" type="submit">Guardar ficha</button></div>` : ""}
         </form>
       </section>
       <section class="tarjeta">
@@ -568,7 +564,8 @@
       </section>`;
     $("#form-ficha").onsubmit = async (e) => {
       e.preventDefault();
-      const v = leerFicha(yo.es_admin);
+      if (!yo.es_admin) return;
+      const v = leerFicha(true);
       const { data, error } = await sb.from("perfiles").update(v).eq("id", yo.id).select().single();
       if (error) return aviso(errorTxt(error), true);
       estado.yo = data;
@@ -596,15 +593,14 @@
         <td>${esc(p.puesto) || '<span class="muted">—</span>'}</td>
         <td class="num">${fmtDec(p.horas_semanales)}</td>
         <td class="num">${eur(p.precio_hora ?? 8)}</td>
-        <td>${esc(p.telefono) || '<span class="muted">—</span>'}</td>
         <td>${p.es_admin ? '<span class="chip chip-admin">Master</span> ' : ""}<span class="chip ${p.activo ? "chip-activo" : "chip-inactivo"}">${p.activo ? "Activo" : "Inactivo"}</span></td>
       </tr>`).join("");
     $("#contenido").innerHTML = `
       <div class="barra"><h1>Usuarios</h1><span class="espacio"></span>
         <button class="btn btn-primario" id="btn-nuevo">+ Nuevo usuario</button></div>
       <div class="tabla-envoltura"><table>
-        <thead><tr><th>Nombre</th><th>Usuario</th><th>Puesto</th><th class="num">Contrato h/sem</th><th class="num">€/hora</th><th>Teléfono</th><th>Estado</th></tr></thead>
-        <tbody>${filas || `<tr><td colspan="7" class="vacio">Todavía no hay usuarios.</td></tr>`}</tbody>
+        <thead><tr><th>Nombre</th><th>Usuario</th><th>Puesto</th><th class="num">Contrato h/sem</th><th class="num">€/hora</th><th>Estado</th></tr></thead>
+        <tbody>${filas || `<tr><td colspan="6" class="vacio">Todavía no hay usuarios.</td></tr>`}</tbody>
       </table></div>
       <p class="muted">Pulsa una fila para ver o editar la ficha. Desactivar a alguien le impide entrar, pero conserva todas sus horas para los informes.</p>`;
     $("#btn-nuevo").onclick = nuevoUsuario;
@@ -622,8 +618,6 @@
           <div><label for="n-puesto">Puesto</label><input id="n-puesto" placeholder="ej. Dependiente"></div>
           <div><label for="n-horas">Horas de contrato por semana</label><input id="n-horas" type="number" min="0" max="80" step="0.5" value="10"></div>
           <div><label for="n-precio">Precio por hora (€)</label><input id="n-precio" type="number" min="0" max="200" step="0.5" value="8"></div>
-          <div><label for="n-alta">Fecha de alta</label><input id="n-alta" type="date" value="${ymd(new Date())}"></div>
-          <div><label for="n-tel">Teléfono</label><input id="n-tel" type="tel"></div>
         </div>
         <p class="muted" style="font-size:.85rem">Dale a la persona su usuario y contraseña. Podrá cambiar la contraseña desde «Mi ficha».</p>
         <p class="error" id="n-error"></p>
@@ -649,7 +643,7 @@
           nombre: $("#n-nombre").value.trim(), apellidos: $("#n-apellidos").value.trim(),
           puesto: $("#n-puesto").value.trim(), horas_semanales: Number($("#n-horas").value) || 0,
           precio_hora: Number($("#n-precio").value) || 0,
-          fecha_alta: $("#n-alta").value || ymd(new Date()), telefono: $("#n-tel").value.trim(),
+
         }).eq("id", data.user.id);
         if (e2) throw e2;
         cerrarModal(); aviso(`Usuario «${usuario}» creado`); vistaUsuarios();

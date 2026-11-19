@@ -274,3 +274,9 @@ alter table public.tarifas enable row level security;
 drop policy if exists tarifas_master on public.tarifas;
 create policy tarifas_master on public.tarifas for all using (public.es_admin()) with check (public.es_admin());
 grant select, insert, update, delete on public.tarifas to authenticated;
+
+-- =====================================================================
+--  (versión 6) Solo el master puede modificar las fichas de las trabajadoras
+-- =====================================================================
+drop policy if exists perfiles_editar on public.perfiles;
+create policy perfiles_editar on public.perfiles for update using (public.es_admin()) with check (public.es_admin());
