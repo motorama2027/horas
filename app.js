@@ -249,7 +249,21 @@
     ({ calendario: vistaCalendario, ficha: vistaFicha, usuarios: vistaUsuarios, informes: vistaInformes })[v]();
   }
 
-  // ================================================================ SEMANA (L–D)
+  // ================================================================ SEMANA (L–D) · clientes por día
+  const DIAS_LARGOS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+  const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR" });
+  const fmtMin = (m) => fmtH((Number(m) || 0) / 60);
+
+  // Cuentas de la semana: horas hechas − horas de contrato = horas extra × precio
+  function cuentas(minutos, p) {
+    const horas = (Number(minutos) || 0) / 60;
+    const contrato = Number(p.horas_semanales) || 0;
+    const precio = Number(p.precio_hora) || 0;
+    const dif = horas - contrato;
+    const extra = Math.max(0, dif);
+    return { horas, contrato, precio, dif, extra, faltan: Math.max(0, -dif), importe: Math.round(extra * precio * 100) / 100 };
+  }
+
   async function vistaCalendario() {
     const yo = estado.yo;
     const activos = estado.perfiles.filter((p) => p.activo);
@@ -265,9 +279,10 @@
         <span class="espacio"></span>
         ${selector}
       </div>
-      <div class="semana" id="semana"></div>
       <div class="sem-pie" id="sem-pie"></div>
-      <p class="muted ayuda">Escribe la hora de entrada y de salida y se guarda solo. Con <b>Más</b> puedes poner turno de tarde, vacaciones, baja o una nota.</p>`;
+      <div class="semana-dias" id="semana"></div>
+      <datalist id="lista-clientes"></datalist>
+      <p class="muted ayuda">Escribe el cliente y el tiempo. Se guarda solo al salir del campo.</p>`;
 
     $("#cal-prev").onclick = () => { estado.calLunes = sumarDias(estado.calLunes, -7); pintarCalendario(); };
     $("#cal-next").onclick = () => { estado.calLunes = sumarDias(estado.calLunes, 7); pintarCalendario(); };
@@ -280,176 +295,133 @@
     return estado.calUsuario === estado.yo.id ? estado.yo : estado.perfiles.find((p) => p.id === estado.calUsuario) || estado.yo;
   }
 
+  async function cargarClientes() {
+    const { data } = await sb.from("trabajos").select("cliente").eq("usuario_id", estado.calUsuario).order("fecha", { ascending: false }).limit(1000);
+    const vistos = new Map();
+    (data || []).forEach((r) => { const k = r.cliente.trim().toLowerCase(); if (!vistos.has(k)) vistos.set(k, r.cliente.trim()); });
+    $("#lista-clientes").innerHTML = [...vistos.values()].sort((a, b) => a.localeCompare(b, "es")).map((c) => `<option value="${esc(c)}"></option>`).join("");
+  }
+
+  function lineaHTML(t) {
+    const min = t ? Number(t.minutos) : 0;
+    const h = t ? Math.floor(min / 60) : "", m = t ? min % 60 : 0;
+    const opcionesMin = Array.from({ length: 12 }, (_, i) => i * 5).map((v) => `<option value="${v}" ${v === m ? "selected" : ""}>${String(v).padStart(2, "0")}</option>`).join("");
+    return `<div class="linea" data-id="${t ? t.id : ""}">
+      <input class="l-cli" list="lista-clientes" maxlength="80" placeholder="Cliente" aria-label="Cliente" value="${t ? esc(t.cliente) : ""}">
+      <span class="l-tiempo">
+        <input class="l-h" type="number" inputmode="numeric" min="0" max="16" placeholder="0" aria-label="Horas" value="${h}"><span class="muted">h</span>
+        <select class="l-m" aria-label="Minutos">${opcionesMin}</select><span class="muted">min</span>
+      </span>
+      <button type="button" class="btn btn-sm btn-fantasma l-borrar" aria-label="Quitar cliente">✕</button>
+      <span class="l-estado"></span>
+    </div>`;
+  }
+
   async function pintarCalendario() {
     const lunes = estado.calLunes, dom = sumarDias(lunes, 6);
     $("#cal-titulo").textContent = `Semana ${numSemana(lunes)}`;
     $("#cal-sub").textContent = rangoSemana(lunes);
 
-    const { data, error } = await sb.from("registros").select("*")
-      .eq("usuario_id", estado.calUsuario).gte("fecha", ymd(lunes)).lte("fecha", ymd(dom));
+    const { data, error } = await sb.from("trabajos").select("*")
+      .eq("usuario_id", estado.calUsuario).gte("fecha", ymd(lunes)).lte("fecha", ymd(dom)).order("id");
     if (error) return aviso(errorTxt(error), true);
-    estado.registrosMes = new Map(data.map((r) => [r.fecha, r]));
+    estado.trabajos = new Map(data.map((t) => [String(t.id), t]));
+    cargarClientes();
 
     const hoy = ymd(new Date());
-    const dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-    $("#semana").innerHTML = `
-      <div class="fila fila-cab" aria-hidden="true"><span>Día</span><span>Entrada</span><span>Salida</span><span>Descanso</span><span class="dcha">Horas</span><span></span></div>` +
-      dias.map((nombre, i) => {
-        const d = sumarDias(lunes, i), k = ymd(d), r = estado.registrosMes.get(k);
-        const simple = !r || (r.tipo === "trabajo" && !r.entrada2);
-        const clases = ["fila", esFinde(d) && "finde", k === hoy && "hoy"].filter(Boolean).join(" ");
-        const dia = `<span class="f-dia"><b>${nombre}</b> <span class="muted">${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)}</span>${k === hoy ? ' <span class="chip chip-festivo">Hoy</span>' : ""}</span>`;
-        const mas = `<button type="button" class="btn btn-sm" data-mas="${k}">Más</button>`;
-        if (simple) {
-          return `<div class="${clases}" data-fecha="${k}">${dia}
-            <label class="f-campo"><span class="f-etq">Entrada</span><input type="time" class="f-e" aria-label="Entrada ${nombre}" value="${hm(r?.entrada1)}"></label>
-            <label class="f-campo"><span class="f-etq">Salida</span><input type="time" class="f-s" aria-label="Salida ${nombre}" value="${hm(r?.salida1)}"></label>
-            <span class="f-pausa"><span class="f-etq">Descanso</span><input type="number" class="f-p" min="0" max="600" step="5" aria-label="Descanso en minutos ${nombre}" value="${r?.pausa_min || ""}" placeholder="0"><span class="muted">min</span></span>
-            <span class="f-total num">${r ? fmtH(r.horas) : '<span class="cero">—</span>'}</span>
-            <span class="f-acc">${mas}<span class="f-estado"></span></span></div>`;
-        }
-        const resumen = r.tipo === "trabajo"
-          ? `<span class="num">${esc(tramosTxt(r))}</span>${r.pausa_min ? ` <span class="muted">· ${r.pausa_min} min descanso</span>` : ""}`
-          : `<span class="chip chip-${r.tipo}">${TIPOS[r.tipo]}</span>${r.nota ? ` <span class="muted">${esc(r.nota)}</span>` : ""}`;
-        return `<div class="${clases}" data-fecha="${k}">${dia}
-          <span class="f-resumen">${resumen}</span>
-          <span class="f-total num">${fmtH(r.horas)}</span>
-          <span class="f-acc"><button type="button" class="btn btn-sm" data-mas="${k}">Editar</button></span></div>`;
-      }).join("");
+    $("#semana").innerHTML = DIAS_LARGOS.map((nombre, i) => {
+      const d = sumarDias(lunes, i), k = ymd(d);
+      const lista = data.filter((t) => t.fecha === k);
+      const clases = ["dia-card", esFinde(d) && "finde", k === hoy && "hoy"].filter(Boolean).join(" ");
+      return `<section class="${clases}" data-fecha="${k}">
+        <div class="dia-cab">
+          <h3>${nombre} <span class="muted">${d.getDate()} ${MESES[d.getMonth()]}</span>${k === hoy ? ' <span class="chip chip-festivo">Hoy</span>' : ""}</h3>
+          <span class="dia-total num"></span>
+        </div>
+        <div class="lineas">${lista.map(lineaHTML).join("")}${lista.length ? "" : lineaHTML(null)}</div>
+        <button type="button" class="btn btn-sm l-anadir">+ Añadir cliente</button>
+      </section>`;
+    }).join("");
 
-    $("#semana").querySelectorAll("[data-mas]").forEach((b) => (b.onclick = () => editarDia(b.dataset.mas)));
-    $("#semana").querySelectorAll(".fila[data-fecha]").forEach((fila) => {
-      if (!fila.querySelector(".f-e")) return;
-      fila.addEventListener("input", () => {
-        const v = valoresFila(fila);
-        fila.querySelector(".f-total").textContent = v.entrada1 && v.salida1 ? fmtH(calcularHoras(v)) : "—";
-      });
-      fila.addEventListener("change", () => guardarFila(fila));
+    $("#semana").querySelectorAll(".dia-card").forEach((card) => {
+      card.querySelector(".l-anadir").onclick = () => {
+        card.querySelector(".lineas").insertAdjacentHTML("beforeend", lineaHTML(null));
+        prepararLinea(card.querySelector(".lineas .linea:last-child"));
+        card.querySelector(".lineas .linea:last-child .l-cli").focus();
+      };
+      card.querySelectorAll(".linea").forEach(prepararLinea);
     });
-    pintarPieSemana();
+    pintarTotales();
   }
 
-  function valoresFila(fila) {
-    return {
-      tipo: "trabajo",
-      entrada1: fila.querySelector(".f-e").value || null,
-      salida1: fila.querySelector(".f-s").value || null,
-      entrada2: null, salida2: null,
-      pausa_min: parseInt(fila.querySelector(".f-p").value, 10) || 0,
-    };
+  function prepararLinea(el) {
+    el.addEventListener("change", (e) => { if (!e.target.classList.contains("l-borrar")) encolar(el, guardarLinea); });
+    el.querySelector(".l-borrar").onclick = () => encolar(el, borrarLinea);
   }
 
-  const colaFila = new Map();
-  function guardarFila(fila) {
-    const fecha = fila.dataset.fecha;
-    const previa = colaFila.get(fecha) || Promise.resolve();
-    const tarea = previa.then(() => guardarFilaAhora(fila)).catch(() => {});
-    colaFila.set(fecha, tarea);
+  const colas = new WeakMap();
+  function encolar(el, fn) {
+    const prev = colas.get(el) || Promise.resolve();
+    const t = prev.then(() => fn(el)).catch((e) => console.error(e));
+    colas.set(el, t);
   }
-  async function guardarFilaAhora(fila) {
-    const fecha = fila.dataset.fecha, est = fila.querySelector(".f-estado");
-    const v = valoresFila(fila), r = estado.registrosMes.get(fecha);
-    const p = perfilCal();
-    const marcar = (txt, mal) => { est.textContent = txt; est.className = "f-estado " + (mal ? "dif-neg" : "dif-pos"); };
-    if (!v.entrada1 && !v.salida1) {
-      if (!r) return;
-      const { error } = await sb.from("registros").delete().eq("id", r.id);
-      if (error) return marcar("No se pudo borrar", true);
-      estado.registrosMes.delete(fecha);
-      fila.querySelector(".f-total").innerHTML = '<span class="cero">—</span>';
-      marcar("Borrado");
-      return pintarPieSemana();
+
+  function marcarLinea(el, txt, mal) {
+    const s = el.querySelector(".l-estado");
+    if (!s) return;
+    s.textContent = txt; s.className = "l-estado " + (mal ? "dif-neg" : "dif-pos");
+  }
+
+  async function guardarLinea(el) {
+    const fecha = el.closest(".dia-card").dataset.fecha;
+    const cliente = el.querySelector(".l-cli").value.trim();
+    const minutos = (parseInt(el.querySelector(".l-h").value, 10) || 0) * 60 + (parseInt(el.querySelector(".l-m").value, 10) || 0);
+    const id = el.dataset.id;
+    if (!cliente && !minutos) { if (id) return borrarLinea(el, true); return marcarLinea(el, ""); }
+    if (!cliente) return marcarLinea(el, "Falta el cliente", true);
+    if (!minutos) return marcarLinea(el, "Falta el tiempo", true);
+    if (minutos > 16 * 60) return marcarLinea(el, "Máximo 16 h", true);
+    const ant = id ? estado.trabajos.get(id) : null;
+    if (ant && ant.cliente === cliente && Number(ant.minutos) === minutos) return;
+    const res = id
+      ? await sb.from("trabajos").update({ cliente, minutos }).eq("id", id).select().single()
+      : await sb.from("trabajos").insert({ usuario_id: perfilCal().id, fecha, cliente, minutos }).select().single();
+    if (res.error) return marcarLinea(el, errorTxt(res.error), true);
+    el.dataset.id = res.data.id;
+    estado.trabajos.set(String(res.data.id), res.data);
+    marcarLinea(el, "✓");
+    pintarTotales();
+  }
+
+  async function borrarLinea(el, mantener) {
+    const id = el.dataset.id;
+    if (id) {
+      const { error } = await sb.from("trabajos").delete().eq("id", id);
+      if (error) return marcarLinea(el, errorTxt(error), true);
+      estado.trabajos.delete(id);
     }
-    if (!v.entrada1 || !v.salida1) return marcar("Falta " + (v.entrada1 ? "la salida" : "la entrada"), true);
-    v.horas = calcularHoras(v);
-    if (v.horas > 16) return marcar("Revisa: más de 16 h", true);
-    const fila2 = { ...v, nota: r?.nota || "", usuario_id: p.id, fecha };
-    const { data, error } = await sb.from("registros").upsert(fila2, { onConflict: "usuario_id,fecha" }).select().single();
-    if (error) return marcar(errorTxt(error), true);
-    estado.registrosMes.set(fecha, data);
-    marcar("✓ Guardado");
-    pintarPieSemana();
+    const lineas = el.parentElement;
+    if (mantener || lineas.children.length === 1) {
+      el.dataset.id = ""; el.querySelector(".l-cli").value = ""; el.querySelector(".l-h").value = ""; el.querySelector(".l-m").value = "0";
+      marcarLinea(el, id ? "Borrado" : "");
+    } else el.remove();
+    pintarTotales();
   }
 
-  function pintarPieSemana() {
-    const p = perfilCal();
-    const objetivo = Number(p.horas_semanales) || 0;
-    let total = 0, dias = 0;
-    for (const r of estado.registrosMes.values()) { total += Number(r.horas); if (r.tipo === "trabajo" && Number(r.horas) > 0) dias++; }
-    const dif = total - objetivo;
-    $("#sem-pie").innerHTML = `
-      <div><span class="etq">Total semana</span><span class="val num">${fmtH(total)}</span></div>
-      <div><span class="etq">Contrato</span><span class="val num">${fmtH(objetivo)}</span></div>
-      <div><span class="etq">${dif >= 0 ? "Horas extra" : "Faltan"}</span><span class="val num ${dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(Math.abs(dif))}</span></div>
-      <div><span class="etq">Días trabajados</span><span class="val num">${dias}</span></div>`;
-  }
-
-  function editarDia(fecha) {
-    const r = estado.registrosMes.get(fecha) || { tipo: "trabajo", entrada1: "", salida1: "", entrada2: "", salida2: "", pausa_min: 0, nota: "" };
-    const p = perfilCal();
-    const ajeno = p.id !== estado.yo.id;
-    abrirModal(fechaLarga(deYmd(fecha)), `
-      <form id="form-dia">
-        ${ajeno ? `<p class="muted" style="margin:0">Editando las horas de <b>${esc(nombreDe(p))}</b></p>` : ""}
-        <label for="d-tipo">Tipo de día</label>
-        <select id="d-tipo">${Object.entries(TIPOS).map(([k, t]) => `<option value="${k}" ${r.tipo === k ? "selected" : ""}>${t}</option>`).join("")}</select>
-        <div id="d-horario" class="tramos">
-          <div class="tramo-tit">Turno 1 (mañana o jornada continua)</div>
-          <div><label for="d-e1">Entrada</label><input id="d-e1" type="time" value="${hm(r.entrada1)}"></div>
-          <div><label for="d-s1">Salida</label><input id="d-s1" type="time" value="${hm(r.salida1)}"></div>
-          <div class="tramo-tit">Turno 2 (tarde, opcional si haces jornada partida)</div>
-          <div><label for="d-e2">Entrada</label><input id="d-e2" type="time" value="${hm(r.entrada2)}"></div>
-          <div><label for="d-s2">Salida</label><input id="d-s2" type="time" value="${hm(r.salida2)}"></div>
-          <div><label for="d-pausa">Descanso (minutos)</label><input id="d-pausa" type="number" min="0" max="600" step="5" value="${Number(r.pausa_min) || 0}"></div>
-        </div>
-        <label for="d-nota">Nota (opcional)</label>
-        <input id="d-nota" maxlength="200" value="${esc(r.nota)}" placeholder="Ej.: inventario, salí antes por médico…">
-        <div class="total-dia"><span>Total del día</span><span class="val" id="d-total">0:00</span></div>
-        <p class="error" id="d-error"></p>
-        <div class="acciones">
-          ${r.id ? `<button type="button" class="btn btn-peligro izq" id="d-borrar">Borrar día</button>` : ""}
-          <button type="button" class="btn" data-cerrar>Cancelar</button>
-          <button type="submit" class="btn btn-primario">Guardar</button>
-        </div>
-      </form>`);
-
-    const leer = () => ({
-      tipo: $("#d-tipo").value,
-      entrada1: $("#d-e1").value || null, salida1: $("#d-s1").value || null,
-      entrada2: $("#d-e2").value || null, salida2: $("#d-s2").value || null,
-      pausa_min: parseInt($("#d-pausa").value, 10) || 0,
-      nota: $("#d-nota").value.trim(),
+  function pintarTotales() {
+    const porDia = new Map();
+    let total = 0;
+    for (const t of estado.trabajos.values()) { porDia.set(t.fecha, (porDia.get(t.fecha) || 0) + Number(t.minutos)); total += Number(t.minutos); }
+    document.querySelectorAll(".dia-card").forEach((c) => {
+      const m = porDia.get(c.dataset.fecha) || 0;
+      c.querySelector(".dia-total").innerHTML = m ? fmtMin(m) + " h" : '<span class="cero">0:00 h</span>';
     });
-    const refrescar = () => {
-      const v = leer();
-      $("#d-horario").hidden = v.tipo !== "trabajo";
-      $("#d-total").textContent = fmtH(calcularHoras(v));
-    };
-    $("#form-dia").addEventListener("input", refrescar);
-    refrescar();
-
-    if (r.id) $("#d-borrar").onclick = async () => {
-      const { error } = await sb.from("registros").delete().eq("id", r.id);
-      if (error) return ($("#d-error").textContent = errorTxt(error));
-      cerrarModal(); aviso("Día borrado"); pintarCalendario();
-    };
-
-    $("#form-dia").onsubmit = async (e) => {
-      e.preventDefault();
-      const v = leer();
-      if (v.tipo === "trabajo") {
-        if (!(v.entrada1 && v.salida1)) return ($("#d-error").textContent = "Pon al menos la hora de entrada y de salida del turno 1.");
-        if (!!v.entrada2 !== !!v.salida2) return ($("#d-error").textContent = "En el turno 2 faltan la entrada o la salida.");
-      } else {
-        Object.assign(v, { entrada1: null, salida1: null, entrada2: null, salida2: null, pausa_min: 0 });
-      }
-      v.horas = calcularHoras(v);
-      if (v.horas > 16) return ($("#d-error").textContent = "Más de 16 horas en un día: revisa las horas.");
-      const fila = { ...v, usuario_id: p.id, fecha };
-      const { error } = await sb.from("registros").upsert(fila, { onConflict: "usuario_id,fecha" });
-      if (error) return ($("#d-error").textContent = errorTxt(error));
-      cerrarModal(); aviso("Guardado"); pintarCalendario();
-    };
+    const c = cuentas(total, perfilCal());
+    $("#sem-pie").innerHTML = `
+      <div><span class="etq">Horas hechas</span><span class="val num">${fmtH(c.horas)}</span></div>
+      <div><span class="etq">− Contrato</span><span class="val num">${fmtH(c.contrato)}</span></div>
+      <div class="${c.dif >= 0 ? "pie-ok" : ""}"><span class="etq">${c.dif >= 0 ? "= Horas extra" : "= Faltan"}</span><span class="val num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(c.dif >= 0 ? c.extra : c.faltan)}</span></div>
+      <div class="pie-dinero"><span class="etq">Extras × ${eur(c.precio)}/h</span><span class="val num">${eur(c.importe)}</span></div>`;
   }
 
   // ================================================================ FICHA PERSONAL
@@ -461,7 +433,8 @@
         <div><label for="f-apellidos">Apellidos</label><input id="f-apellidos" value="${esc(p.apellidos)}" ${ro}></div>
         <div><label for="f-dni">DNI / NIE</label><input id="f-dni" value="${esc(p.dni)}" ${ro}></div>
         <div><label for="f-puesto">Puesto</label><input id="f-puesto" value="${esc(p.puesto)}" ${ro}></div>
-        <div><label for="f-horas">Horas semanales de contrato</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}" ${ro}></div>
+        <div><label for="f-horas">Horas de contrato por semana</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}" ${ro}></div>
+        <div><label for="f-precio">Precio por hora (€)</label><input id="f-precio" type="number" min="0" max="200" step="0.5" value="${Number(p.precio_hora ?? 8)}" ${ro}></div>
         <div><label for="f-alta">Fecha de alta</label><input id="f-alta" type="date" value="${esc(p.fecha_alta)}" ${ro}></div>
         <div><label for="f-tel">Teléfono</label><input id="f-tel" type="tel" value="${esc(p.telefono)}"></div>
         <div><label for="f-email">Email de contacto</label><input id="f-email" type="email" value="${esc(p.email_contacto)}"></div>
@@ -474,6 +447,7 @@
     if (admin) Object.assign(v, {
       nombre: $("#f-nombre").value.trim(), apellidos: $("#f-apellidos").value.trim(), dni: $("#f-dni").value.trim(),
       puesto: $("#f-puesto").value.trim(), horas_semanales: Number($("#f-horas").value) || 0,
+      precio_hora: Number($("#f-precio").value) || 0,
       fecha_alta: $("#f-alta").value || null, notas: $("#f-notas").value,
     });
     return v;
@@ -526,6 +500,7 @@
         <td class="muted">${esc(p.usuario)}</td>
         <td>${esc(p.puesto) || '<span class="muted">—</span>'}</td>
         <td class="num">${fmtDec(p.horas_semanales)}</td>
+        <td class="num">${eur(p.precio_hora ?? 8)}</td>
         <td>${esc(p.telefono) || '<span class="muted">—</span>'}</td>
         <td>${p.es_admin ? '<span class="chip chip-admin">Master</span> ' : ""}<span class="chip ${p.activo ? "chip-activo" : "chip-inactivo"}">${p.activo ? "Activo" : "Inactivo"}</span></td>
       </tr>`).join("");
@@ -533,8 +508,8 @@
       <div class="barra"><h1>Usuarios</h1><span class="espacio"></span>
         <button class="btn btn-primario" id="btn-nuevo">+ Nuevo usuario</button></div>
       <div class="tabla-envoltura"><table>
-        <thead><tr><th>Nombre</th><th>Usuario</th><th>Puesto</th><th class="num">H/semana</th><th>Teléfono</th><th>Estado</th></tr></thead>
-        <tbody>${filas || `<tr><td colspan="6" class="vacio">Todavía no hay usuarios.</td></tr>`}</tbody>
+        <thead><tr><th>Nombre</th><th>Usuario</th><th>Puesto</th><th class="num">Contrato h/sem</th><th class="num">€/hora</th><th>Teléfono</th><th>Estado</th></tr></thead>
+        <tbody>${filas || `<tr><td colspan="7" class="vacio">Todavía no hay usuarios.</td></tr>`}</tbody>
       </table></div>
       <p class="muted">Pulsa una fila para ver o editar la ficha. Desactivar a alguien le impide entrar, pero conserva todas sus horas para los informes.</p>`;
     $("#btn-nuevo").onclick = nuevoUsuario;
@@ -550,7 +525,8 @@
           <div><label for="n-nombre">Nombre</label><input id="n-nombre" required></div>
           <div><label for="n-apellidos">Apellidos</label><input id="n-apellidos"></div>
           <div><label for="n-puesto">Puesto</label><input id="n-puesto" placeholder="ej. Dependiente"></div>
-          <div><label for="n-horas">Horas semanales de contrato</label><input id="n-horas" type="number" min="0" max="80" step="0.5" value="40"></div>
+          <div><label for="n-horas">Horas de contrato por semana</label><input id="n-horas" type="number" min="0" max="80" step="0.5" value="10"></div>
+          <div><label for="n-precio">Precio por hora (€)</label><input id="n-precio" type="number" min="0" max="200" step="0.5" value="8"></div>
           <div><label for="n-alta">Fecha de alta</label><input id="n-alta" type="date" value="${ymd(new Date())}"></div>
           <div><label for="n-tel">Teléfono</label><input id="n-tel" type="tel"></div>
         </div>
@@ -577,6 +553,7 @@
           activo: true,
           nombre: $("#n-nombre").value.trim(), apellidos: $("#n-apellidos").value.trim(),
           puesto: $("#n-puesto").value.trim(), horas_semanales: Number($("#n-horas").value) || 0,
+          precio_hora: Number($("#n-precio").value) || 0,
           fecha_alta: $("#n-alta").value || ymd(new Date()), telefono: $("#n-tel").value.trim(),
         }).eq("id", data.user.id);
         if (e2) throw e2;
@@ -634,121 +611,118 @@
         <button class="btn btn-sm btn-fantasma" id="inf-hoy">Esta semana</button>
         <button class="btn btn-sm btn-fantasma" id="inf-ant">Semana pasada</button>
         <span class="espacio"></span>
-        <button class="btn btn-sm" id="inf-csv">Descargar Excel (CSV)</button>
-        <button class="btn btn-sm" id="inf-print">Imprimir / PDF</button>
+        <button class="btn btn-sm" id="inf-csv">Descargar Excel (todos)</button>
+        <button class="btn btn-sm" id="inf-print">Imprimir / PDF (todos)</button>
       </div>
       <div><h1 id="inf-titulo"></h1><p class="muted" id="inf-sub" style="margin:4px 0 0"></p></div>
       <div class="resumen" id="inf-resumen"></div>
       <div class="tabla-envoltura" id="inf-tabla"></div>
       <section class="detalle" id="inf-detalle"></section>
+      <section class="tarjeta" id="inf-clientes"></section>
       <section class="tarjeta no-imprimir" id="inf-historico"></section>`;
     const mover = (n) => { estado.infLunes = sumarDias(estado.infLunes, n); pintarInforme(); };
     $("#inf-prev").onclick = () => mover(-7);
     $("#inf-next").onclick = () => mover(7);
     $("#inf-hoy").onclick = () => { estado.infLunes = lunesDe(new Date()); pintarInforme(); };
     $("#inf-ant").onclick = () => { estado.infLunes = sumarDias(lunesDe(new Date()), -7); pintarInforme(); };
-    $("#inf-print").onclick = () => window.print();
+    $("#inf-print").onclick = () => { document.body.classList.remove("imprimir-ficha"); window.print(); };
     pintarInforme();
   }
 
   async function pintarInforme() {
     const lunes = estado.infLunes, dom = sumarDias(lunes, 6);
     const dias = Array.from({ length: 7 }, (_, i) => sumarDias(lunes, i));
+    const kd = dias.map(ymd);
     $("#inf-titulo").textContent = `Informe semana ${numSemana(lunes)}`;
     $("#inf-sub").textContent = rangoSemana(lunes);
 
     const desdeHist = sumarDias(lunes, -7 * 7);
-    const { data, error } = await sb.from("registros").select("*").gte("fecha", ymd(desdeHist)).lte("fecha", ymd(dom));
+    const { data, error } = await sb.from("trabajos").select("*").gte("fecha", ymd(desdeHist)).lte("fecha", ymd(dom)).order("fecha").order("id");
     if (error) return aviso(errorTxt(error), true);
 
-    const semana = data.filter((r) => r.fecha >= ymd(lunes));
-    const conHoras = new Set(semana.map((r) => r.usuario_id));
-    const personas = estado.perfiles.filter((p) => p.activo || conHoras.has(p.id));
-    const mapa = new Map(semana.map((r) => [`${r.usuario_id}|${r.fecha}`, r]));
+    const semana = data.filter((t) => t.fecha >= kd[0]);
+    const conHoras = new Set(semana.map((t) => t.usuario_id));
+    const personas = estado.perfiles.filter((p) => conHoras.has(p.id) || (p.activo && !p.es_admin));
+    const minDia = (pid, k) => semana.filter((t) => t.usuario_id === pid && t.fecha === k).reduce((a, t) => a + Number(t.minutos), 0);
 
     const totDia = Array(7).fill(0);
-    let totGen = 0, totObj = 0;
+    let tHoras = 0, tContrato = 0, tExtra = 0, tImporte = 0;
     const filas = personas.map((p) => {
-      let t = 0;
-      const celdas = dias.map((d, i) => {
-        const r = mapa.get(`${p.id}|${ymd(d)}`);
-        const h = r ? Number(r.horas) : 0;
-        t += h; totDia[i] += h;
-        const cont = !r ? `<span class="cero">·</span>` : r.tipo !== "trabajo" ? `<span class="chip chip-${r.tipo}">${TIPOS[r.tipo]}</span>` : fmtH(h);
-        return `<td class="num ${esFinde(d) ? "finde" : ""}">${cont}</td>`;
-      }).join("");
-      const obj = Number(p.horas_semanales) || 0, dif = t - obj;
-      totGen += t; totObj += obj;
-      return { p, t, html: `<tr><td><b>${esc(nombreDe(p))}</b><div class="muted" style="font-size:.78rem">${esc(p.puesto)}</div></td>${celdas}
-        <td class="num"><b>${fmtH(t)}</b></td><td class="num muted">${fmtH(obj)}</td>
-        <td class="num ${dif >= 0 ? "dif-pos" : "dif-neg"}">${dif >= 0 ? "+" : ""}${fmtH(dif)}</td></tr>` };
+      let min = 0;
+      const celdas = kd.map((k, i) => { const m = minDia(p.id, k); min += m; totDia[i] += m; return `<td class="num ${esFinde(dias[i]) ? "finde" : ""}">${m ? fmtMin(m) : '<span class="cero">·</span>'}</td>`; }).join("");
+      const c = cuentas(min, p);
+      tHoras += c.horas; tContrato += c.contrato; tExtra += c.extra; tImporte += c.importe;
+      return { p, min, c, html: `<tr><td><b>${esc(nombreDe(p))}</b></td>${celdas}
+        <td class="num"><b>${fmtH(c.horas)}</b></td><td class="num muted">${fmtH(c.contrato)}</td>
+        <td class="num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${c.dif >= 0 ? fmtH(c.extra) : "−" + fmtH(c.faltan)}</td>
+        <td class="num muted">${eur(c.precio)}</td><td class="num"><b>${eur(c.importe)}</b></td></tr>` };
     });
 
     $("#inf-tabla").innerHTML = `<table>
       <thead><tr><th>Persona</th>${dias.map((d) => `<th class="num ${esFinde(d) ? "finde" : ""}">${diaCorto(d)}</th>`).join("")}
-        <th class="num">Total</th><th class="num">Contrato</th><th class="num">Diferencia</th></tr></thead>
-      <tbody>${filas.map((f) => f.html).join("") || `<tr><td colspan="11" class="vacio">No hay usuarios activos.</td></tr>`}</tbody>
-      <tfoot><tr><td>Total equipo</td>${totDia.map((h, i) => `<td class="num ${esFinde(dias[i]) ? "finde" : ""}">${fmtH(h)}</td>`).join("")}
-        <td class="num">${fmtH(totGen)}</td><td class="num">${fmtH(totObj)}</td>
-        <td class="num ${totGen - totObj >= 0 ? "dif-pos" : "dif-neg"}">${totGen - totObj >= 0 ? "+" : ""}${fmtH(totGen - totObj)}</td></tr></tfoot>
+        <th class="num">Total</th><th class="num">Contrato</th><th class="num">Extra</th><th class="num">€/hora</th><th class="num">Importe extra</th></tr></thead>
+      <tbody>${filas.map((f) => f.html).join("") || `<tr><td colspan="13" class="vacio">No hay usuarios activos.</td></tr>`}</tbody>
+      <tfoot><tr><td>Total</td>${totDia.map((m, i) => `<td class="num ${esFinde(dias[i]) ? "finde" : ""}">${fmtMin(m)}</td>`).join("")}
+        <td class="num">${fmtH(tHoras)}</td><td class="num">${fmtH(tContrato)}</td><td class="num dif-pos">${fmtH(tExtra)}</td><td></td><td class="num">${eur(tImporte)}</td></tr></tfoot>
     </table>`;
 
-    const sinApuntar = personas.filter((p) => p.activo && !dias.slice(0, 5).some((d) => mapa.has(`${p.id}|${ymd(d)}`)));
+    const sinApuntar = personas.filter((p) => p.activo && !semana.some((t) => t.usuario_id === p.id));
     $("#inf-resumen").innerHTML = `
-      <div class="dato"><div class="etq">Horas del equipo</div><div class="val">${fmtH(totGen)}</div><div class="sub">${fmtDec(totGen)} h decimales</div></div>
-      <div class="dato"><div class="etq">Previstas por contrato</div><div class="val">${fmtH(totObj)}</div><div class="sub">${personas.length} personas</div></div>
-      <div class="dato"><div class="etq">Diferencia</div><div class="val ${totGen - totObj >= 0 ? "dif-pos" : "dif-neg"}">${totGen - totObj >= 0 ? "+" : ""}${fmtH(totGen - totObj)}</div><div class="sub">horas extra o pendientes</div></div>
-      <div class="dato"><div class="etq">Sin apuntar L–V</div><div class="val">${sinApuntar.length}</div><div class="sub">${sinApuntar.map((p) => esc(p.nombre || p.usuario)).join(", ") || "todos al día"}</div></div>`;
+      <div class="dato"><div class="etq">Horas hechas</div><div class="val">${fmtH(tHoras)}</div><div class="sub">${personas.length} personas</div></div>
+      <div class="dato"><div class="etq">Horas de contrato</div><div class="val">${fmtH(tContrato)}</div><div class="sub">se restan del total</div></div>
+      <div class="dato"><div class="etq">Horas extra</div><div class="val dif-pos">${fmtH(tExtra)}</div><div class="sub">por encima del contrato</div></div>
+      <div class="dato"><div class="etq">A pagar por extras</div><div class="val">${eur(tImporte)}</div><div class="sub">${sinApuntar.length ? "Sin apuntar: " + sinApuntar.map((p) => esc(p.nombre || p.usuario)).join(", ") : "todos han apuntado"}</div></div>`;
 
-    // Ficha semanal de cada persona: entradas y salidas de cada día, con descarga e impresión individual
-    $("#inf-detalle").innerHTML = `<h2 class="no-imprimir">Fichas semanales por persona</h2>` + filas.map(({ p, t }) => {
-      const obj = Number(p.horas_semanales) || 0, dif = t - obj;
+    // Ficha semanal de cada persona
+    const lineasPersona = (pid) => semana.filter((t) => t.usuario_id === pid);
+    $("#inf-detalle").innerHTML = `<h2 class="no-imprimir">Fichas semanales por persona</h2>` + filas.map(({ p, c }) => {
+      const ls = lineasPersona(p.id);
+      const cuerpo = kd.map((k, i) => {
+        const delDia = ls.filter((t) => t.fecha === k);
+        const sub = delDia.reduce((a, t) => a + Number(t.minutos), 0);
+        const fd = esFinde(dias[i]) ? "finde" : "";
+        if (!delDia.length) return `<tr><td class="${fd}">${diaCorto(dias[i])}</td><td class="cero">—</td><td class="num cero">0:00</td><td class="num cero"></td></tr>`;
+        return delDia.map((t, j) => `<tr class="${j === 0 ? "dia-ini" : ""}"><td class="${fd}">${j === 0 ? diaCorto(dias[i]) : ""}</td><td>${esc(t.cliente)}</td><td class="num">${fmtMin(t.minutos)}</td>
+          <td class="num">${j === delDia.length - 1 ? "<b>" + fmtMin(sub) + "</b>" : ""}</td></tr>`).join("");
+      }).join("");
       return `
       <div class="detalle-persona tarjeta" data-persona="${p.id}">
         <div class="barra">
-          <h3>${esc(nombreDe(p))} <span class="muted" style="font-weight:500">${esc(p.puesto)}</span></h3>
+          <h3>${esc(nombreDe(p))}</h3>
           <span class="espacio"></span>
           <span class="no-imprimir"><button class="btn btn-sm" data-csv="${p.id}">Descargar Excel</button>
           <button class="btn btn-sm" data-imprimir="${p.id}">Imprimir / PDF</button></span>
         </div>
-        <p class="solo-imprimir">Registro de jornada · ${esc(rangoSemana(lunes))} (semana ${numSemana(lunes)})${p.dni ? " · DNI/NIE " + esc(p.dni) : ""}</p>
-        <div class="tabla-envoltura"><table>
-          <thead><tr><th>Día</th><th>Tipo</th><th>Turno 1</th><th>Turno 2</th><th class="num">Descanso</th><th class="num">Horas</th><th>Nota</th></tr></thead>
-          <tbody>${dias.map((d) => {
-            const r = mapa.get(`${p.id}|${ymd(d)}`);
-            if (!r) return `<tr><td class="${esFinde(d) ? "finde" : ""}">${diaCorto(d)}</td><td colspan="6" class="cero">sin registro</td></tr>`;
-            const t1 = r.entrada1 ? `${hm(r.entrada1)}–${hm(r.salida1)}` : "—";
-            const t2 = r.entrada2 ? `${hm(r.entrada2)}–${hm(r.salida2)}` : "—";
-            return `<tr><td class="${esFinde(d) ? "finde" : ""}">${diaCorto(d)}</td><td><span class="chip chip-${r.tipo}">${TIPOS[r.tipo]}</span></td>
-              <td class="num" style="text-align:left">${t1}</td><td class="num" style="text-align:left">${t2}</td>
-              <td class="num">${r.pausa_min ? r.pausa_min + " min" : "—"}</td><td class="num"><b>${fmtH(r.horas)}</b></td><td>${esc(r.nota)}</td></tr>`;
-          }).join("")}</tbody>
-          <tfoot><tr><td colspan="5">Total semana · contrato ${fmtH(obj)} · diferencia <span class="${dif >= 0 ? "dif-pos" : "dif-neg"}">${dif >= 0 ? "+" : ""}${fmtH(dif)}</span></td>
-            <td class="num">${fmtH(t)}</td><td></td></tr></tfoot></table></div>
+        <p class="solo-imprimir">${esc(rangoSemana(lunes))} (semana ${numSemana(lunes)})${p.dni ? " · DNI/NIE " + esc(p.dni) : ""}</p>
+        <div class="tabla-envoltura"><table class="tabla-ficha">
+          <thead><tr><th>Día</th><th>Cliente</th><th class="num">Tiempo</th><th class="num">Total día</th></tr></thead>
+          <tbody>${cuerpo}</tbody>
+        </table></div>
+        <div class="cuentas">
+          <div><span>Horas hechas</span><b class="num">${fmtH(c.horas)}</b></div>
+          <div><span>− Horas de contrato</span><b class="num">${fmtH(c.contrato)}</b></div>
+          <div><span>= ${c.dif >= 0 ? "Horas extra" : "Faltan"}</span><b class="num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(c.dif >= 0 ? c.extra : c.faltan)}</b></div>
+          <div class="total"><span>Importe extras (${fmtH(c.extra)} × ${eur(c.precio)})</span><b class="num">${eur(c.importe)}</b></div>
+        </div>
         <div class="firmas solo-imprimir"><div>Firma del trabajador</div><div>Firma de la empresa</div></div>
       </div>`;
     }).join("");
 
     const fichaCSV = (p) => {
-      let t = 0;
-      const filasDia = dias.map((d) => {
-        const r = mapa.get(`${p.id}|${ymd(d)}`);
-        if (!r) return [diaCorto(d), ymd(d), "", "", "", "", "", "", "", ""];
-        t += Number(r.horas);
-        return [diaCorto(d), ymd(d), TIPOS[r.tipo], hm(r.entrada1), hm(r.salida1), hm(r.entrada2), hm(r.salida2), r.pausa_min || "", fmtDec(r.horas), r.nota];
-      });
-      const obj = Number(p.horas_semanales) || 0;
+      const ls = lineasPersona(p.id);
+      const c = cuentas(ls.reduce((a, t) => a + Number(t.minutos), 0), p);
       return [
-        ["Registro de jornada", nombreDe(p)],
-        ["Puesto", p.puesto], ["DNI/NIE", p.dni],
+        ["Ficha semanal", nombreDe(p)],
         ["Semana", `${numSemana(lunes)} · ${rangoSemana(lunes)}`],
         [],
-        ["Día", "Fecha", "Tipo", "Entrada 1", "Salida 1", "Entrada 2", "Salida 2", "Descanso (min)", "Horas", "Nota"],
-        ...filasDia,
+        ["Día", "Fecha", "Cliente", "Tiempo (h:mm)", "Horas (decimal)"],
+        ...ls.map((t) => [diaCorto(deYmd(t.fecha)), t.fecha, t.cliente, fmtMin(t.minutos), fmtDec(t.minutos / 60)]),
         [],
-        ["Total semana", "", "", "", "", "", "", "", fmtDec(t)],
-        ["Horas de contrato", "", "", "", "", "", "", "", fmtDec(obj)],
-        ["Diferencia", "", "", "", "", "", "", "", fmtDec(t - obj)],
+        ["Horas hechas", "", "", fmtH(c.horas), fmtDec(c.horas)],
+        ["Horas de contrato", "", "", fmtH(c.contrato), fmtDec(c.contrato)],
+        [c.dif >= 0 ? "Horas extra" : "Faltan", "", "", fmtH(c.dif >= 0 ? c.extra : c.faltan), fmtDec(c.dif >= 0 ? c.extra : c.faltan)],
+        ["Precio hora", "", "", "", fmtDec(c.precio)],
+        ["Importe extras (€)", "", "", "", fmtDec(c.importe)],
       ];
     };
     document.querySelectorAll("[data-csv]").forEach((b) => (b.onclick = () => {
@@ -762,46 +736,39 @@
       setTimeout(() => document.body.classList.remove("imprimir-ficha"), 500);
     }));
 
-    // Histórico de las últimas 8 semanas
+    // Horas por cliente (útil para facturar)
+    const porCliente = new Map();
+    semana.forEach((t) => {
+      const k = t.cliente.trim().toLowerCase();
+      const v = porCliente.get(k) || { nombre: t.cliente.trim(), min: 0, gente: new Set() };
+      v.min += Number(t.minutos); v.gente.add(t.usuario_id); porCliente.set(k, v);
+    });
+    const listaCli = [...porCliente.values()].sort((a, b) => b.min - a.min);
+    $("#inf-clientes").innerHTML = `<h2>Horas por cliente</h2>${listaCli.length ? `<div class="tabla-envoltura"><table>
+      <thead><tr><th>Cliente</th><th class="num">Horas</th><th>Quién</th></tr></thead>
+      <tbody>${listaCli.map((v) => `<tr><td>${esc(v.nombre)}</td><td class="num">${fmtMin(v.min)}</td><td class="muted">${[...v.gente].map((id) => esc(nombreDe(estado.perfiles.find((p) => p.id === id)))).join(", ")}</td></tr>`).join("")}</tbody>
+    </table></div>` : `<p class="muted">Esta semana no hay trabajos apuntados.</p>`}`;
+
+    // Últimas 8 semanas: horas y extra
     const lunesHist = Array.from({ length: 8 }, (_, i) => sumarDias(lunes, -7 * (7 - i)));
-    const totHist = (pid, l) => data.filter((r) => r.usuario_id === pid && r.fecha >= ymd(l) && r.fecha <= ymd(sumarDias(l, 6))).reduce((a, r) => a + Number(r.horas), 0);
-    $("#inf-historico").innerHTML = `<h2>Últimas 8 semanas</h2><div class="tabla-envoltura"><table>
+    const minSem = (pid, l) => data.filter((t) => t.usuario_id === pid && t.fecha >= ymd(l) && t.fecha <= ymd(sumarDias(l, 6))).reduce((a, t) => a + Number(t.minutos), 0);
+    $("#inf-historico").innerHTML = `<h2>Últimas 8 semanas</h2><p class="muted" style="margin:0 0 10px">Horas hechas y, debajo, horas extra.</p><div class="tabla-envoltura"><table>
       <thead><tr><th>Persona</th>${lunesHist.map((l) => `<th class="num">S${numSemana(l)}<div style="font-weight:500;text-transform:none">${l.getDate()} ${MESES[l.getMonth()].slice(0, 3)}</div></th>`).join("")}</tr></thead>
-      <tbody>${personas.map((p) => `<tr><td>${esc(nombreDe(p))}</td>${lunesHist.map((l) => { const h = totHist(p.id, l); return `<td class="num">${h ? fmtH(h) : '<span class="cero">·</span>'}</td>`; }).join("")}</tr>`).join("")}</tbody>
+      <tbody>${personas.map((p) => `<tr><td>${esc(nombreDe(p))}</td>${lunesHist.map((l) => { const m = minSem(p.id, l); const c = cuentas(m, p); return `<td class="num">${m ? fmtMin(m) + (c.extra ? `<div class="dif-pos" style="font-size:.78rem">+${fmtH(c.extra)}</div>` : "") : '<span class="cero">·</span>'}</td>`; }).join("")}</tr>`).join("")}</tbody>
     </table></div>`;
 
-    // Exportar CSV (se abre en Excel)
+    // Excel de todo el equipo
     $("#inf-csv").onclick = () => {
-      const sep = ";";
-      const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
-      const lineas = [
-        [q(`Informe semana ${numSemana(lunes)}`), q(rangoSemana(lunes))].join(sep),
-        "",
-        ["Persona", "Puesto", ...dias.map((d) => diaCorto(d)), "Total", "Contrato", "Diferencia"].map(q).join(sep),
-        ...personas.map((p) => {
-          let t = 0;
-          const v = dias.map((d) => {
-            const r = mapa.get(`${p.id}|${ymd(d)}`);
-            if (!r) return "";
-            t += Number(r.horas);
-            return r.tipo === "trabajo" ? fmtDec(r.horas) : TIPOS[r.tipo];
-          });
-          const obj = Number(p.horas_semanales) || 0;
-          return [q(nombreDe(p)), q(p.puesto), ...v.map(q), q(fmtDec(t)), q(fmtDec(obj)), q(fmtDec(t - obj))].join(sep);
-        }),
-        "",
-        ["Persona", "Fecha", "Tipo", "Entrada 1", "Salida 1", "Entrada 2", "Salida 2", "Descanso (min)", "Horas", "Nota"].map(q).join(sep),
-        ...semana.sort((a, b) => (a.fecha < b.fecha ? -1 : 1)).map((r) => {
-          const p = estado.perfiles.find((x) => x.id === r.usuario_id);
-          return [nombreDe(p), r.fecha, TIPOS[r.tipo], hm(r.entrada1), hm(r.salida1), hm(r.entrada2), hm(r.salida2), r.pausa_min, fmtDec(r.horas), r.nota].map(q).join(sep);
-        }),
+      const filasCSV = [
+        [`Informe semana ${numSemana(lunes)}`, rangoSemana(lunes)],
+        [],
+        ["Persona", ...dias.map(diaCorto), "Total horas", "Contrato", "Extra", "€/hora", "Importe extra (€)"],
+        ...filas.map(({ p, c }) => [nombreDe(p), ...kd.map((k) => { const m = minDia(p.id, k); return m ? fmtDec(m / 60) : ""; }), fmtDec(c.horas), fmtDec(c.contrato), fmtDec(c.extra), fmtDec(c.precio), fmtDec(c.importe)]),
+        [],
+        ["Persona", "Fecha", "Día", "Cliente", "Tiempo (h:mm)", "Horas (decimal)"],
+        ...semana.map((t) => [nombreDe(estado.perfiles.find((x) => x.id === t.usuario_id)), t.fecha, diaCorto(deYmd(t.fecha)), t.cliente, fmtMin(t.minutos), fmtDec(t.minutos / 60)]),
       ];
-      const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `horas_semana_${ymd(lunes)}_a_${ymd(dom)}.csv`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      descargarCSV(`horas_semana_${ymd(lunes)}_a_${ymd(dom)}.csv`, filasCSV);
     };
   }
 

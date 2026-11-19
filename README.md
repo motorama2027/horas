@@ -3,9 +3,9 @@
 App web para registrar las horas del equipo.
 
 - **Tú (master)** creas los usuarios, ves y corriges las horas de todos y sacas los **informes semanales de lunes a domingo**.
-- **Cada trabajador** entra con su usuario y contraseña, ve **solo sus horas** y su ficha, y apunta cada día en un **calendario de lunes a domingo** que siempre abre en el mes actual.
-- Cada día se apunta como: Trabajado (turno 1 y, si hace jornada partida, turno 2, más el descanso), Vacaciones, Festivo, Baja o Ausencia. La app calcula el total.
-- El informe muestra una tabla por persona con columnas `lun 16 · mar 17 · … · dom 22`, el total, las horas de contrato y la diferencia, el detalle de entradas y salidas, y las últimas 8 semanas. Se puede descargar para Excel o imprimir en PDF (A4 horizontal).
+- **Cada trabajador** entra con su usuario y contraseña, ve **solo sus horas** y su ficha, y apunta **semana a semana (lunes a domingo)** los clientes que ha hecho cada día y el tiempo de cada uno (ej. *Dolores 2 h 30 min · Peluquería 1 h · Escalera Sant Pere 45 min*).
+- Cuentas de cada semana: **horas hechas − horas de contrato = horas extra × precio por hora** de esa persona (cada trabajador tiene su propio precio, editable en su ficha).
+- El informe semanal muestra una tabla por persona (`lun 16 · mar 17 · … · dom 22`, total, contrato, extra, €/hora e importe), la ficha de cada persona con sus clientes día a día (descargable en Excel o imprimible en PDF, A4 horizontal), las horas por cliente y las últimas 8 semanas.
 
 Funciona con **Supabase** (base de datos y usuarios, plan gratuito) y **GitHub Pages** (publicar la web, gratis).
 
@@ -40,7 +40,7 @@ Al minuto tendrás la app en `https://motorama2027.github.io/horas/`.
 Abre la web. Como aún no hay usuarios, te pedirá **crear la cuenta master**: elige tu usuario y contraseña. Esa primera cuenta es la única con acceso a todo.
 
 ### 5. Da de alta a tu equipo
-Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, puesto y horas semanales de contrato. Pásale a cada persona la dirección de la web, su usuario y su contraseña. Desde **Mi ficha** pueden cambiar la contraseña y sus datos de contacto.
+Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, horas de contrato por semana y precio por hora. Pásale a cada persona la dirección de la web, su usuario y su contraseña. Desde **Mi ficha** pueden cambiar la contraseña y sus datos de contacto.
 
 ---
 
@@ -48,10 +48,14 @@ Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, pu
 
 | Quién | Qué hace |
 |---|---|
-| Trabajador | **Calendario** → pulsa el día → entrada/salida (y turno de tarde si tiene) → Guardar. Ve su total semanal a la derecha de cada semana. |
+| Trabajador | **Calendario** → en cada día escribe el cliente y el tiempo; **+ Añadir cliente** para el siguiente. Se guarda solo. Arriba ve sus horas, el contrato, las extras y el importe. |
 | Master | **Calendario** → elige la persona en el desplegable para ver o corregir sus horas. |
 | Master | **Informes semanales** → «Semana pasada» para el informe de lunes a domingo cerrado. Flechas para ir a otras semanas. «Descargar Excel» o «Imprimir / PDF». |
 | Master | **Usuarios** → pulsa una fila para editar la ficha, desactivar a alguien (no puede entrar pero conserva su historial) o hacerlo master. |
+
+## Actualizar la base de datos
+
+Si cambia `supabase/schema.sql`, vuelve a pegarlo entero en **SQL Editor** y pulsa **Run**. Se puede ejecutar las veces que haga falta: no borra datos.
 
 ## Preguntas frecuentes
 

@@ -139,47 +139,50 @@ textarea { min-height: 70px; resize: vertical; }
 .sem-total .val { font: 700 1.05rem var(--f-num); color: var(--acento); }
 .sem-total .sub { font-size: .72rem; color: var(--tinta-2); }
 
-/* ---------- Semana (una fila por día) ---------- */
+/* ---------- Semana: una tarjeta por día con sus clientes ---------- */
 .sem-titulo { min-width: 220px; }
 .sem-titulo #cal-titulo { font-size: 1.25rem; font-weight: 700; }
 .sem-titulo .muted { font-size: .88rem; }
-.semana { background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio); overflow: hidden; }
-.fila {
-  display: grid; grid-template-columns: minmax(150px, 1.4fr) 1fr 1fr minmax(110px, .9fr) 80px minmax(130px, 1fr);
-  gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--linea);
-}
-.fila:last-child { border-bottom: 0; }
-.fila-cab { padding: 8px 16px; background: #f8f9fb; font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tinta-2); }
-.fila.finde { background: var(--finde); }
-.fila.hoy { box-shadow: inset 4px 0 0 var(--acento-2); }
-.fila input { padding: .5rem .6rem; }
-.f-pausa { display: flex; align-items: center; gap: 6px; }
-.f-campo { margin: 0; font-weight: 400; }
-.f-etq { display: none; }
-.f-pausa input { width: 72px; }
-.f-total { font-size: 1.1rem; font-weight: 700; text-align: right; }
-.f-resumen { grid-column: 2 / 5; }
-.f-acc { display: flex; align-items: center; gap: 8px; }
-.f-estado { font-size: .8rem; font-weight: 600; }
-.sem-pie { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.semana-dias { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 14px; }
+.dia-card { background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.dia-card.finde { background: var(--finde); }
+.dia-card.hoy { border-color: var(--acento-2); box-shadow: inset 4px 0 0 var(--acento-2); }
+.dia-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.dia-cab h3 .muted { font-weight: 500; }
+.dia-total { font-size: 1.15rem; font-weight: 700; color: var(--acento); }
+.lineas { display: flex; flex-direction: column; gap: 8px; }
+.linea { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 8px; align-items: center; }
+.linea input, .linea select { padding: .45rem .55rem; }
+.l-tiempo { display: flex; align-items: center; gap: 4px; }
+.l-h { width: 58px; text-align: right; }
+.l-m { width: 64px; font-family: var(--f-num); }
+.l-borrar { color: var(--tinta-3); padding: .3rem .5rem; }
+.l-borrar:hover { color: var(--mal); }
+.l-estado { grid-column: 1 / -1; font-size: .78rem; font-weight: 600; min-height: 0; }
+.l-estado:empty { display: none; }
+.l-anadir { align-self: flex-start; }
+
+.sem-pie { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .sem-pie > div { background: var(--papel); border: 1px solid var(--linea); border-radius: var(--radio); padding: 12px 16px; display: flex; flex-direction: column; }
 .sem-pie .etq { font-size: .76rem; font-weight: 600; color: var(--tinta-3); text-transform: uppercase; letter-spacing: .04em; }
 .sem-pie .val { font-size: 1.5rem; font-weight: 600; }
+.sem-pie .pie-dinero { background: var(--acento); border-color: var(--acento); }
+.sem-pie .pie-dinero .etq { color: #c9d7ea; }
+.sem-pie .pie-dinero .val { color: #fff; }
 .ayuda { margin: 0; font-size: .88rem; }
 
+/* Cuentas al pie de cada ficha */
+.cuentas { margin-top: 12px; margin-left: auto; width: 100%; max-width: 380px; display: grid; gap: 4px; }
+.cuentas > div { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
+.cuentas .total { border-top: 2px solid var(--tinta); margin-top: 4px; padding-top: 8px; font-size: 1.05rem; }
+.tabla-ficha tr.dia-ini td { border-top: 2px solid var(--linea); }
+
 @media (max-width: 760px) {
-  .sem-titulo { min-width: 0; flex: 1; }
-  .sem-titulo #cal-titulo { font-size: 1.05rem; }
-  .fila-cab { display: none; }
-  .fila { grid-template-columns: 1fr 1fr; gap: 8px 10px; }
-  .f-dia { grid-column: 1 / -1; }
-  .f-resumen { grid-column: 1 / -1; }
-  .f-pausa { grid-column: 1; }
-  .f-total { grid-column: 2; }
-  .f-acc { grid-column: 1 / -1; }
-  .f-etq { display: block; font-size: .72rem; font-weight: 600; color: var(--tinta-3); margin-bottom: 2px; }
-  .f-pausa { flex-wrap: wrap; }
-  .f-pausa .f-etq { flex-basis: 100%; }
+  .sem-titulo { min-width: 0; flex-basis: 100%; order: -1; }
+  .sem-titulo #cal-titulo { font-size: 1.15rem; }
+  .semana-dias { grid-template-columns: 1fr; }
+  .linea { grid-template-columns: 1fr auto; }
+  .l-cli { grid-column: 1 / -1; }
 }
 
 .chip { display: inline-block; font-size: .7rem; font-weight: 700; padding: 1px 7px; border-radius: 99px; letter-spacing: .02em; width: fit-content; }

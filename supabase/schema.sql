@@ -14,7 +14,7 @@ create table if not exists public.perfiles (
   email_contacto   text not null default '',
   direccion        text not null default '',
   puesto           text not null default '',
-  horas_semanales  numeric(5,2) not null default 40,
+  horas_semanales  numeric(5,2) not null default 10,
   fecha_alta       date not null default current_date,
   notas            text not null default '',
   es_admin         boolean not null default false,
@@ -97,6 +97,7 @@ begin
     new.horas_semanales := old.horas_semanales;
     new.fecha_alta      := old.fecha_alta;
     new.notas           := old.notas;
+    new.precio_hora     := old.precio_hora;
     new.es_admin        := old.es_admin;
     new.activo          := old.activo;
   end if;
@@ -147,3 +148,38 @@ grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on public.perfiles  to authenticated;
 grant select, insert, update, delete on public.registros to authenticated;
 grant execute on function public.es_admin(), public.esta_activo() to authenticated;
+
+-- =====================================================================
+--  CLIENTES POR DÍA (versión 2): cada trabajador apunta los clientes
+--  que ha hecho cada día y el tiempo dedicado a cada uno.
+-- =====================================================================
+alter table public.perfiles add column if not exists precio_hora numeric(6,2) not null default 8;
+
+create table if not exists public.trabajos (
+  id          bigint generated always as identity primary key,
+  usuario_id  uuid not null references public.perfiles(id) on delete cascade,
+  fecha       date not null,
+  cliente     text not null check (length(trim(cliente)) between 1 and 80),
+  minutos     integer not null check (minutos > 0 and minutos <= 960),
+  nota        text not null default '',
+  creado      timestamptz not null default now()
+);
+create index if not exists trabajos_usuario_fecha_idx on public.trabajos (usuario_id, fecha);
+create index if not exists trabajos_fecha_idx on public.trabajos (fecha);
+
+alter table public.trabajos enable row level security;
+drop policy if exists trabajos_ver    on public.trabajos;
+drop policy if exists trabajos_crear  on public.trabajos;
+drop policy if exists trabajos_editar on public.trabajos;
+drop policy if exists trabajos_borrar on public.trabajos;
+create policy trabajos_ver    on public.trabajos for select
+  using (usuario_id = auth.uid() or public.es_admin());
+create policy trabajos_crear  on public.trabajos for insert
+  with check ((usuario_id = auth.uid() and public.esta_activo()) or public.es_admin());
+create policy trabajos_editar on public.trabajos for update
+  using ((usuario_id = auth.uid() and public.esta_activo()) or public.es_admin())
+  with check ((usuario_id = auth.uid() and public.esta_activo()) or public.es_admin());
+create policy trabajos_borrar on public.trabajos for delete
+  using ((usuario_id = auth.uid() and public.esta_activo()) or public.es_admin());
+
+grant select, insert, update, delete on public.trabajos to authenticated;
