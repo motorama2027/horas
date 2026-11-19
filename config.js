@@ -8,9 +8,9 @@ window.CONFIG = {
   SUPABASE_ANON_KEY: "sb_publishable_qyM9bXMdth3nMlGB6BhH-w_Uc18euWd",
 
   // Nombre que aparece arriba en la app
-  EMPRESA: "Motorama",
+  EMPRESA: "Control de horas",
 
   // Los usuarios entran con "usuario + contraseña". Por dentro Supabase
   // necesita un email, así que se genera usuario@ESTE_DOMINIO (no se envía nada).
-  DOMINIO_USUARIOS: "equipo.motorama.app",
+  DOMINIO_USUARIOS: "equipo.horas.app",
 };

@@ -60,7 +60,7 @@ Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, pu
 ```sql
 update auth.users
 set encrypted_password = crypt('NuevaClave123', gen_salt('bf'))
-where email = 'laura.g@equipo.motorama.app';
+where email = 'laura.g@equipo.horas.app';
 ```
 
 **Quiero borrar del todo a alguien.** Desactívalo desde la app (recomendado, conserva sus horas). Para borrarlo por completo: Supabase → *Authentication → Users* → borrar; se eliminan también su ficha y sus horas.
