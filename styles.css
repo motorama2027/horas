@@ -151,14 +151,23 @@ textarea { min-height: 70px; resize: vertical; }
 .dia-cab h3 .muted { font-weight: 500; }
 .dia-total { font-size: 1.15rem; font-weight: 700; color: var(--acento); }
 .lineas { display: flex; flex-direction: column; gap: 8px; }
-.linea { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 8px; align-items: center; }
+.linea { display: grid; grid-template-columns: auto auto 1fr auto; grid-template-areas: "cli cli cli x" "tiempo cobro . ." "aviso aviso aviso aviso" "estado estado estado estado"; gap: 6px 14px; align-items: center; padding-bottom: 8px; border-bottom: 1px dashed var(--linea); }
+.linea:last-child { border-bottom: 0; padding-bottom: 0; }
+.l-cli { grid-area: cli; font-weight: 500; }
+.l-tiempo { grid-area: tiempo; }
+.l-cobro { grid-area: cobro; display: flex; align-items: center; gap: 4px; margin: 0; font-weight: 400; font-size: .85rem; }
+.l-eur { width: 76px; text-align: right; font-family: var(--f-num); }
+.l-borrar { grid-area: x; }
+.l-aviso { grid-area: aviso; font-size: .78rem; color: var(--aviso); }
 .linea input, .linea select { padding: .45rem .55rem; }
 .l-tiempo { display: flex; align-items: center; gap: 4px; }
+.sem-pie .sub { font-size: .8rem; color: var(--tinta-3); }
+.sem-pie .pie-dinero .sub { color: #c9d7ea; }
 .l-h { width: 58px; text-align: right; }
 .l-m { width: 64px; font-family: var(--f-num); }
 .l-borrar { color: var(--tinta-3); padding: .3rem .5rem; }
 .l-borrar:hover { color: var(--mal); }
-.l-estado { grid-column: 1 / -1; font-size: .78rem; font-weight: 600; min-height: 0; }
+.l-estado { grid-area: estado; font-size: .78rem; font-weight: 600; min-height: 0; }
 .l-estado:empty { display: none; }
 .l-anadir { align-self: flex-start; }
 
@@ -171,6 +180,20 @@ textarea { min-height: 70px; resize: vertical; }
 .sem-pie .pie-dinero .val { color: #fff; }
 .ayuda { margin: 0; font-size: .88rem; }
 
+/* Ficha semanal en informes */
+.ficha-cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr); gap: 18px; align-items: start; }
+.ficha-lado { display: flex; flex-direction: column; gap: 12px; }
+.ficha-lado .cuentas { margin: 0; max-width: none; }
+.cuentas .desc { color: var(--tinta-2); font-size: .92rem; }
+.ficha-extra { background: var(--fondo); border-radius: 8px; padding: 12px 14px; }
+.ficha-extra h4 { margin: 0 0 8px; font-size: .85rem; }
+.ficha-extra label { margin-top: 12px; }
+.ants { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.ant { display: grid; grid-template-columns: 1fr 86px auto auto; gap: 6px; align-items: center; }
+.ant input { padding: .4rem .55rem; }
+.a-imp { text-align: right; font-family: var(--f-num); }
+@media (max-width: 860px) { .ficha-cols { grid-template-columns: 1fr; } }
+
 /* Cuentas al pie de cada ficha */
 .cuentas { margin-top: 12px; margin-left: auto; width: 100%; max-width: 380px; display: grid; gap: 4px; }
 .cuentas > div { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
@@ -181,8 +204,7 @@ textarea { min-height: 70px; resize: vertical; }
   .sem-titulo { min-width: 0; flex-basis: 100%; order: -1; }
   .sem-titulo #cal-titulo { font-size: 1.15rem; }
   .semana-dias { grid-template-columns: 1fr; }
-  .linea { grid-template-columns: 1fr auto; }
-  .l-cli { grid-column: 1 / -1; }
+  .linea { grid-template-columns: auto 1fr auto; grid-template-areas: "cli cli x" "tiempo tiempo tiempo" "cobro cobro cobro" "aviso aviso aviso" "estado estado estado"; }
 }
 
 .chip { display: inline-block; font-size: .7rem; font-weight: 700; padding: 1px 7px; border-radius: 99px; letter-spacing: .02em; width: fit-content; }

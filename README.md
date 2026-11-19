@@ -39,7 +39,10 @@ Al minuto tendrás la app en `https://motorama2027.github.io/horas/`.
 ### 4. Crea tu cuenta master
 Abre la web. Como aún no hay usuarios, te pedirá **crear la cuenta master**: elige tu usuario y contraseña. Esa primera cuenta es la única con acceso a todo.
 
-### 5. Da de alta a tu equipo
+### 5. Carga tus clientes
+En **SQL Editor** pega [`supabase/clientes_inicial.sql`](supabase/clientes_inicial.sql) y pulsa **Run** (54 clientes de la hoja). Luego, en la app, sección **Clientes**, completa la dirección y el teléfono de cada uno, o añade más con **+ Nuevo cliente** o **Pegar lista**.
+
+### 6. Da de alta a tu equipo
 Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, horas de contrato por semana y precio por hora. Pásale a cada persona la dirección de la web, su usuario y su contraseña. Desde **Mi ficha** pueden cambiar la contraseña y sus datos de contacto.
 
 ---
@@ -51,6 +54,8 @@ Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, ho
 | Trabajador | **Calendario** → en cada día escribe el cliente y el tiempo; **+ Añadir cliente** para el siguiente. Se guarda solo. Arriba ve sus horas, el contrato, las extras y el importe. |
 | Master | **Calendario** → elige la persona en el desplegable para ver o corregir sus horas. |
 | Master | **Informes semanales** → «Semana pasada» para el informe de lunes a domingo cerrado. Flechas para ir a otras semanas. «Descargar Excel» o «Imprimir / PDF». |
+| Master | **Clientes** → ficha de cada cliente, horas y visitas del mes, lo cobrado y quién ha ido. «Descargar Excel del mes». |
+| Master | **Informes semanales** → en la ficha de cada una: anticipos, observaciones y fecha de entrega. **Descargar Excel** → hoja vertical por semana (salmón/verde alternando), como la de papel. |
 | Master | **Usuarios** → pulsa una fila para editar la ficha, desactivar a alguien (no puede entrar pero conserva su historial) o hacerlo master. |
 
 ## Actualizar la base de datos
