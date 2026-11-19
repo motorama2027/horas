@@ -4,8 +4,8 @@
 //  la seguridad la ponen las reglas de schema.sql, no esta clave.
 // =====================================================================
 window.CONFIG = {
-  SUPABASE_URL: https://gchjortycbnmitppnked.supabase.co/rest/v1/,
-  SUPABASE_ANON_KEY: sb_publishable_qyM9bXMdth3nMlGB6BhH-w_Uc18euWd,
+  SUPABASE_URL: "https://gchjortycbnmitppnked.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_qyM9bXMdth3nMlGB6BhH-w_Uc18euWd",
 
   // Nombre que aparece arriba en la app
   EMPRESA: "Motorama",
