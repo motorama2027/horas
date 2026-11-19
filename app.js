@@ -35,7 +35,7 @@
     perfiles: [],          // (admin) todos los perfiles
     vista: "calendario",
     calUsuario: null,      // id del usuario mostrado en el calendario
-    calMes: inicioMes(new Date()),
+    calLunes: lunesDe(new Date()),
     infLunes: lunesDe(new Date()),
     registrosMes: new Map(),
   };
@@ -249,7 +249,7 @@
     ({ calendario: vistaCalendario, ficha: vistaFicha, usuarios: vistaUsuarios, informes: vistaInformes })[v]();
   }
 
-  // ================================================================ CALENDARIO (L–D)
+  // ================================================================ SEMANA (L–D)
   async function vistaCalendario() {
     const yo = estado.yo;
     const activos = estado.perfiles.filter((p) => p.activo);
@@ -258,21 +258,20 @@
       : "";
     $("#contenido").innerHTML = `
       <div class="barra">
-        <button class="btn btn-sm" id="cal-prev" aria-label="Mes anterior">‹</button>
-        <div class="titulo-periodo" id="cal-titulo"></div>
-        <button class="btn btn-sm" id="cal-next" aria-label="Mes siguiente">›</button>
-        <button class="btn btn-sm btn-fantasma" id="cal-hoy">Hoy</button>
+        <button class="btn" id="cal-prev" aria-label="Semana anterior">‹</button>
+        <div class="sem-titulo"><div id="cal-titulo"></div><div class="muted" id="cal-sub"></div></div>
+        <button class="btn" id="cal-next" aria-label="Semana siguiente">›</button>
+        <button class="btn btn-fantasma" id="cal-hoy">Esta semana</button>
         <span class="espacio"></span>
         ${selector}
       </div>
-      <div class="resumen" id="cal-resumen"></div>
-      <div class="cal-envoltura"><div class="cal" id="cal"></div></div>
-      <div class="leyenda">${Object.entries(TIPOS).map(([k, t]) => `<span class="chip chip-${k}">${t}</span>`).join("")}
-        <span>· Pulsa un día para apuntar o corregir las horas.</span></div>`;
+      <div class="semana" id="semana"></div>
+      <div class="sem-pie" id="sem-pie"></div>
+      <p class="muted ayuda">Escribe la hora de entrada y de salida y se guarda solo. Con <b>Más</b> puedes poner turno de tarde, vacaciones, baja o una nota.</p>`;
 
-    $("#cal-prev").onclick = () => { estado.calMes = new Date(estado.calMes.getFullYear(), estado.calMes.getMonth() - 1, 1); pintarCalendario(); };
-    $("#cal-next").onclick = () => { estado.calMes = new Date(estado.calMes.getFullYear(), estado.calMes.getMonth() + 1, 1); pintarCalendario(); };
-    $("#cal-hoy").onclick = () => { estado.calMes = inicioMes(new Date()); pintarCalendario(); };
+    $("#cal-prev").onclick = () => { estado.calLunes = sumarDias(estado.calLunes, -7); pintarCalendario(); };
+    $("#cal-next").onclick = () => { estado.calLunes = sumarDias(estado.calLunes, 7); pintarCalendario(); };
+    $("#cal-hoy").onclick = () => { estado.calLunes = lunesDe(new Date()); pintarCalendario(); };
     if (yo.es_admin) $("#cal-usuario").onchange = (e) => { estado.calUsuario = e.target.value; pintarCalendario(); };
     pintarCalendario();
   }
@@ -282,59 +281,107 @@
   }
 
   async function pintarCalendario() {
-    const mes = estado.calMes;
-    $("#cal-titulo").textContent = `${MESES[mes.getMonth()]} ${mes.getFullYear()}`;
-    const ini = lunesDe(mes);
-    const finMes = new Date(mes.getFullYear(), mes.getMonth() + 1, 0);
-    const fin = sumarDias(lunesDe(finMes), 6);
+    const lunes = estado.calLunes, dom = sumarDias(lunes, 6);
+    $("#cal-titulo").textContent = `Semana ${numSemana(lunes)}`;
+    $("#cal-sub").textContent = rangoSemana(lunes);
 
     const { data, error } = await sb.from("registros").select("*")
-      .eq("usuario_id", estado.calUsuario).gte("fecha", ymd(ini)).lte("fecha", ymd(fin));
+      .eq("usuario_id", estado.calUsuario).gte("fecha", ymd(lunes)).lte("fecha", ymd(dom));
     if (error) return aviso(errorTxt(error), true);
     estado.registrosMes = new Map(data.map((r) => [r.fecha, r]));
 
+    const hoy = ymd(new Date());
+    const dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+    $("#semana").innerHTML = `
+      <div class="fila fila-cab" aria-hidden="true"><span>Día</span><span>Entrada</span><span>Salida</span><span>Descanso</span><span class="dcha">Horas</span><span></span></div>` +
+      dias.map((nombre, i) => {
+        const d = sumarDias(lunes, i), k = ymd(d), r = estado.registrosMes.get(k);
+        const simple = !r || (r.tipo === "trabajo" && !r.entrada2);
+        const clases = ["fila", esFinde(d) && "finde", k === hoy && "hoy"].filter(Boolean).join(" ");
+        const dia = `<span class="f-dia"><b>${nombre}</b> <span class="muted">${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)}</span>${k === hoy ? ' <span class="chip chip-festivo">Hoy</span>' : ""}</span>`;
+        const mas = `<button type="button" class="btn btn-sm" data-mas="${k}">Más</button>`;
+        if (simple) {
+          return `<div class="${clases}" data-fecha="${k}">${dia}
+            <label class="f-campo"><span class="f-etq">Entrada</span><input type="time" class="f-e" aria-label="Entrada ${nombre}" value="${hm(r?.entrada1)}"></label>
+            <label class="f-campo"><span class="f-etq">Salida</span><input type="time" class="f-s" aria-label="Salida ${nombre}" value="${hm(r?.salida1)}"></label>
+            <span class="f-pausa"><span class="f-etq">Descanso</span><input type="number" class="f-p" min="0" max="600" step="5" aria-label="Descanso en minutos ${nombre}" value="${r?.pausa_min || ""}" placeholder="0"><span class="muted">min</span></span>
+            <span class="f-total num">${r ? fmtH(r.horas) : '<span class="cero">—</span>'}</span>
+            <span class="f-acc">${mas}<span class="f-estado"></span></span></div>`;
+        }
+        const resumen = r.tipo === "trabajo"
+          ? `<span class="num">${esc(tramosTxt(r))}</span>${r.pausa_min ? ` <span class="muted">· ${r.pausa_min} min descanso</span>` : ""}`
+          : `<span class="chip chip-${r.tipo}">${TIPOS[r.tipo]}</span>${r.nota ? ` <span class="muted">${esc(r.nota)}</span>` : ""}`;
+        return `<div class="${clases}" data-fecha="${k}">${dia}
+          <span class="f-resumen">${resumen}</span>
+          <span class="f-total num">${fmtH(r.horas)}</span>
+          <span class="f-acc"><button type="button" class="btn btn-sm" data-mas="${k}">Editar</button></span></div>`;
+      }).join("");
+
+    $("#semana").querySelectorAll("[data-mas]").forEach((b) => (b.onclick = () => editarDia(b.dataset.mas)));
+    $("#semana").querySelectorAll(".fila[data-fecha]").forEach((fila) => {
+      if (!fila.querySelector(".f-e")) return;
+      fila.addEventListener("input", () => {
+        const v = valoresFila(fila);
+        fila.querySelector(".f-total").textContent = v.entrada1 && v.salida1 ? fmtH(calcularHoras(v)) : "—";
+      });
+      fila.addEventListener("change", () => guardarFila(fila));
+    });
+    pintarPieSemana();
+  }
+
+  function valoresFila(fila) {
+    return {
+      tipo: "trabajo",
+      entrada1: fila.querySelector(".f-e").value || null,
+      salida1: fila.querySelector(".f-s").value || null,
+      entrada2: null, salida2: null,
+      pausa_min: parseInt(fila.querySelector(".f-p").value, 10) || 0,
+    };
+  }
+
+  const colaFila = new Map();
+  function guardarFila(fila) {
+    const fecha = fila.dataset.fecha;
+    const previa = colaFila.get(fecha) || Promise.resolve();
+    const tarea = previa.then(() => guardarFilaAhora(fila)).catch(() => {});
+    colaFila.set(fecha, tarea);
+  }
+  async function guardarFilaAhora(fila) {
+    const fecha = fila.dataset.fecha, est = fila.querySelector(".f-estado");
+    const v = valoresFila(fila), r = estado.registrosMes.get(fecha);
+    const p = perfilCal();
+    const marcar = (txt, mal) => { est.textContent = txt; est.className = "f-estado " + (mal ? "dif-neg" : "dif-pos"); };
+    if (!v.entrada1 && !v.salida1) {
+      if (!r) return;
+      const { error } = await sb.from("registros").delete().eq("id", r.id);
+      if (error) return marcar("No se pudo borrar", true);
+      estado.registrosMes.delete(fecha);
+      fila.querySelector(".f-total").innerHTML = '<span class="cero">—</span>';
+      marcar("Borrado");
+      return pintarPieSemana();
+    }
+    if (!v.entrada1 || !v.salida1) return marcar("Falta " + (v.entrada1 ? "la salida" : "la entrada"), true);
+    v.horas = calcularHoras(v);
+    if (v.horas > 16) return marcar("Revisa: más de 16 h", true);
+    const fila2 = { ...v, nota: r?.nota || "", usuario_id: p.id, fecha };
+    const { data, error } = await sb.from("registros").upsert(fila2, { onConflict: "usuario_id,fecha" }).select().single();
+    if (error) return marcar(errorTxt(error), true);
+    estado.registrosMes.set(fecha, data);
+    marcar("✓ Guardado");
+    pintarPieSemana();
+  }
+
+  function pintarPieSemana() {
     const p = perfilCal();
     const objetivo = Number(p.horas_semanales) || 0;
-    const hoy = ymd(new Date());
-    let html = DIAS_CORTOS.map((d, i) => `<div class="cal-cab">${d}</div>`).join("") + `<div class="cal-cab sem">Semana</div>`;
-    let totalMes = 0, diasTrab = 0, diasVac = 0;
-
-    for (let l = new Date(ini); l <= fin; l = sumarDias(l, 7)) {
-      let totalSem = 0;
-      for (let i = 0; i < 7; i++) {
-        const d = sumarDias(l, i), k = ymd(d), r = estado.registrosMes.get(k);
-        const dentro = d.getMonth() === mes.getMonth();
-        const h = r ? Number(r.horas) : 0;
-        totalSem += h;
-        if (dentro && r) {
-          totalMes += h;
-          if (r.tipo === "trabajo" && h > 0) diasTrab++;
-          if (r.tipo === "vacaciones") diasVac++;
-        }
-        const clases = ["dia", esFinde(d) && "finde", !dentro && "fuera", k === hoy && "hoy"].filter(Boolean).join(" ");
-        html += `<button type="button" class="${clases}" data-fecha="${k}" aria-label="${fechaLarga(d)}">
-          <span class="dia-num">${d.getDate()}</span>
-          ${r ? `<span class="chip chip-${r.tipo}">${TIPOS[r.tipo]}</span>` : ""}
-          ${r && r.tipo === "trabajo" ? `<span class="dia-horas">${fmtH(h)}</span><span class="dia-tramos">${esc(tramosTxt(r))}</span>` : ""}
-        </button>`;
-      }
-      const dif = totalSem - objetivo;
-      html += `<div class="sem-total"><span class="sub">S${numSemana(l)}</span><span class="val">${fmtH(totalSem)}</span>
-        <span class="sub ${dif >= 0 ? "dif-pos" : "dif-neg"}">${objetivo ? (dif >= 0 ? "+" : "") + fmtH(dif) : ""}</span></div>`;
-    }
-    $("#cal").innerHTML = html;
-    $("#cal").querySelectorAll(".dia").forEach((b) => (b.onclick = () => editarDia(b.dataset.fecha)));
-
-    // resumen de la semana actual + mes
-    const lunesHoy = lunesDe(new Date());
-    let semActual = 0;
-    for (let i = 0; i < 7; i++) { const r = estado.registrosMes.get(ymd(sumarDias(lunesHoy, i))); if (r) semActual += Number(r.horas); }
-    const enRango = lunesHoy >= ini && lunesHoy <= fin;
-    $("#cal-resumen").innerHTML = `
-      ${enRango ? `<div class="dato"><div class="etq">Esta semana</div><div class="val">${fmtH(semActual)}</div><div class="sub">de ${fmtH(objetivo)} previstas</div></div>` : ""}
-      <div class="dato"><div class="etq">Total ${MESES[mes.getMonth()]}</div><div class="val">${fmtH(totalMes)}</div><div class="sub">${fmtDec(totalMes)} h decimales</div></div>
-      <div class="dato"><div class="etq">Días trabajados</div><div class="val">${diasTrab}</div><div class="sub">en el mes</div></div>
-      <div class="dato"><div class="etq">Vacaciones</div><div class="val">${diasVac}</div><div class="sub">días en el mes</div></div>`;
+    let total = 0, dias = 0;
+    for (const r of estado.registrosMes.values()) { total += Number(r.horas); if (r.tipo === "trabajo" && Number(r.horas) > 0) dias++; }
+    const dif = total - objetivo;
+    $("#sem-pie").innerHTML = `
+      <div><span class="etq">Total semana</span><span class="val num">${fmtH(total)}</span></div>
+      <div><span class="etq">Contrato</span><span class="val num">${fmtH(objetivo)}</span></div>
+      <div><span class="etq">${dif >= 0 ? "Horas extra" : "Faltan"}</span><span class="val num ${dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(Math.abs(dif))}</span></div>
+      <div><span class="etq">Días trabajados</span><span class="val num">${dias}</span></div>`;
   }
 
   function editarDia(fecha) {
