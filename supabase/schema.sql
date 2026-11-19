@@ -141,3 +141,9 @@ create policy registros_editar on public.registros for update
   with check ((usuario_id = auth.uid() and public.esta_activo()) or public.es_admin());
 create policy registros_borrar on public.registros for delete
   using ((usuario_id = auth.uid() and public.esta_activo()) or public.es_admin());
+
+-- ---------- Permisos de acceso a las tablas (las reglas de arriba deciden qué filas ve cada uno) ----------
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.perfiles  to authenticated;
+grant select, insert, update, delete on public.registros to authenticated;
+grant execute on function public.es_admin(), public.esta_activo() to authenticated;
