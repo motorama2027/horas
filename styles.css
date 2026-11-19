@@ -153,7 +153,14 @@ textarea { min-height: 70px; resize: vertical; }
 .lineas { display: flex; flex-direction: column; gap: 8px; }
 .linea { display: grid; grid-template-columns: auto auto 1fr auto; grid-template-areas: "cli cli cli x" "otro otro otro otro" "tiempo cobro . ." "estado estado estado estado"; gap: 6px 14px; align-items: center; padding-bottom: 8px; border-bottom: 1px dashed var(--linea); }
 .linea:last-child { border-bottom: 0; padding-bottom: 0; }
-.l-cli { grid-area: cli; font-weight: 500; }
+.l-buscador { grid-area: cli; position: relative; }
+.l-busca { font-weight: 500; }
+.l-sug { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 280px; overflow-y: auto;
+  background: var(--papel); border: 1px solid var(--linea); border-radius: 8px; box-shadow: 0 10px 30px rgba(23,33,46,.16); padding: 4px; }
+.l-op { padding: .5rem .65rem; border-radius: 6px; cursor: pointer; font-size: .92rem; }
+.l-op:hover, .l-op.activa { background: var(--acento-suave); color: var(--acento); }
+.l-op-otro { border-top: 1px solid var(--linea); margin-top: 4px; color: var(--aviso); font-weight: 600; }
+.l-op-info { padding: .45rem .65rem; font-size: .8rem; color: var(--tinta-3); }
 .l-tiempo { grid-area: tiempo; }
 .l-cobro { grid-area: cobro; display: flex; align-items: center; gap: 4px; margin: 0; font-weight: 400; font-size: .85rem; }
 .l-eur { width: 76px; text-align: right; font-family: var(--f-num); }

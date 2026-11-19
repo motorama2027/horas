@@ -276,7 +276,7 @@
 
   async function cargarListaClientes() {
     const { data, error } = await sb.from("clientes").select("*").order("nombre");
-    if (!error) estado.clientes = data;
+    if (!error) estado.clientes = data.sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
   }
   const clientePorId = (id) => estado.clientes.find((c) => String(c.id) === String(id));
   const nombreCliente = (t) => clientePorId(t.cliente_id)?.nombre || t.cliente;
@@ -328,7 +328,11 @@
     const aMano = t && !t.cliente_id;
     const otro = `<input class="l-otro" maxlength="80" placeholder="Escribe el cliente como lo conozcas (ej. casa del perro)" aria-label="Cliente escrito a mano" value="${aMano ? esc(t.cliente) : ""}" ${aMano ? "" : "hidden"}>`;
     return `<div class="linea" data-id="${t ? t.id : ""}">
-      <select class="l-cli" aria-label="Cliente">${opcionesClientes(aMano ? OTRO : t?.cliente_id)}</select>
+      <div class="l-buscador">
+        <input class="l-busca" autocomplete="off" placeholder="🔍 Busca o elige cliente…" aria-label="Cliente" value="${aMano ? "✏️ Escrito a mano" : t?.cliente_id ? esc(nombreCliente(t)) : ""}">
+        <input type="hidden" class="l-cli" value="${aMano ? OTRO : t?.cliente_id ?? ""}">
+        <div class="l-sug" role="listbox" hidden></div>
+      </div>
       ${otro}
       <span class="l-tiempo">
         <input class="l-h" type="number" inputmode="numeric" min="0" max="16" placeholder="0" aria-label="Horas" value="${h}"><span class="muted">h</span>
@@ -372,7 +376,7 @@
       card.querySelector(".l-anadir").onclick = () => {
         card.querySelector(".lineas").insertAdjacentHTML("beforeend", lineaHTML(null));
         prepararLinea(card.querySelector(".lineas .linea:last-child"));
-        card.querySelector(".lineas .linea:last-child .l-cli").focus();
+        card.querySelector(".lineas .linea:last-child .l-busca").focus();
       };
       card.querySelectorAll(".linea").forEach(prepararLinea);
     });
@@ -380,13 +384,62 @@
     pintarTotales();
   }
 
-  function prepararLinea(el) {
-    el.querySelector(".l-cli").addEventListener("input", (e) => {
-      const o = el.querySelector(".l-otro");
-      o.hidden = e.target.value !== OTRO;
-      if (!o.hidden) setTimeout(() => o.focus(), 0);
+  // Quita acentos y mayúsculas para buscar ("maría" encuentra "MARIA")
+  const normal = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+  function prepararBuscador(el) {
+    const inp = el.querySelector(".l-busca"), oculto = el.querySelector(".l-cli"), sug = el.querySelector(".l-sug"), otro = el.querySelector(".l-otro");
+    let activo = -1, opciones = [];
+    const textoActual = () => (oculto.value === OTRO ? "✏️ Escrito a mano" : clientePorId(oculto.value)?.nombre || "");
+    const elegir = (op) => {
+      if (!op) return;
+      if (op.otro) {
+        oculto.value = OTRO; inp.value = "✏️ Escrito a mano";
+        otro.hidden = false;
+        if (op.texto && !otro.value) otro.value = op.texto;
+        setTimeout(() => otro.focus(), 0);
+      } else {
+        oculto.value = op.id; inp.value = op.nombre; otro.hidden = true;
+      }
+      cerrar();
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const cerrar = () => { sug.hidden = true; activo = -1; };
+    const pintar = () => {
+      const q = normal(inp.value === textoActual() ? "" : inp.value);
+      const lista = estado.clientes.filter((c) => c.activo && (!q || normal(c.nombre).includes(q)));
+      // primero los que empiezan por lo escrito
+      if (q) lista.sort((a, b) => (normal(b.nombre).startsWith(q) - normal(a.nombre).startsWith(q)) || a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+      opciones = lista.slice(0, 60).map((c) => ({ id: c.id, nombre: c.nombre }));
+      const textoLibre = inp.value.trim() && inp.value !== textoActual() ? inp.value.trim() : "";
+      opciones.push({ otro: true, texto: textoLibre });
+      sug.innerHTML = opciones.map((o, i) => o.otro
+        ? `<div class="l-op l-op-otro ${i === activo ? "activa" : ""}" data-i="${i}" role="option">✏️ No está en la lista: ${textoLibre ? `escribir «${esc(textoLibre)}»` : "escribirlo"}</div>`
+        : `<div class="l-op ${i === activo ? "activa" : ""}" data-i="${i}" role="option">${esc(o.nombre)}</div>`).join("")
+        + (lista.length > 60 ? `<div class="l-op-info">Hay ${lista.length - 60} más: escribe para filtrar</div>` : "")
+        + (!lista.length && q ? `<div class="l-op-info">Ningún cliente se llama así</div>` : "");
+      sug.hidden = false;
+      sug.querySelector(".activa")?.scrollIntoView({ block: "nearest" });
+    };
+    inp.addEventListener("focus", () => { inp.select(); pintar(); });
+    inp.addEventListener("input", () => { activo = 0; pintar(); });
+    inp.addEventListener("keydown", (e) => {
+      if (sug.hidden && (e.key === "ArrowDown" || e.key === "Enter")) { pintar(); e.preventDefault(); return; }
+      if (e.key === "ArrowDown") { activo = Math.min(opciones.length - 1, activo + 1); pintar(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { activo = Math.max(0, activo - 1); pintar(); e.preventDefault(); }
+      else if (e.key === "Enter") { e.preventDefault(); elegir(opciones[activo >= 0 ? activo : 0]); }
+      else if (e.key === "Escape") { inp.value = textoActual(); cerrar(); }
     });
-    el.addEventListener("change", (e) => { if (!e.target.classList.contains("l-borrar")) encolar(el, guardarLinea); });
+    sug.addEventListener("mousedown", (e) => {
+      const d = e.target.closest(".l-op"); if (!d) return;
+      e.preventDefault(); elegir(opciones[Number(d.dataset.i)]);
+    });
+    inp.addEventListener("blur", () => setTimeout(() => { if (!sug.hidden) { inp.value = textoActual(); cerrar(); } }, 120));
+  }
+
+  function prepararLinea(el) {
+    prepararBuscador(el);
+    el.addEventListener("change", (e) => { if (!e.target.classList.contains("l-borrar") && !e.target.classList.contains("l-busca")) encolar(el, guardarLinea); });
     el.querySelector(".l-borrar").onclick = () => encolar(el, borrarLinea);
   }
 
@@ -443,7 +496,7 @@
     }
     const lineas = el.parentElement;
     if (mantener || lineas.children.length === 1) {
-      el.dataset.id = ""; el.querySelector(".l-cli").value = ""; el.querySelector(".l-h").value = ""; el.querySelector(".l-m").value = "0"; el.querySelector(".l-eur").value = "";
+      el.dataset.id = ""; el.querySelector(".l-cli").value = ""; el.querySelector(".l-busca").value = ""; el.querySelector(".l-h").value = ""; el.querySelector(".l-m").value = "0"; el.querySelector(".l-eur").value = "";
       el.querySelector(".l-otro").value = ""; el.querySelector(".l-otro").hidden = true;
       marcarLinea(el, id ? "Borrado" : "");
     } else el.remove();
@@ -657,7 +710,9 @@
         <button class="btn btn-sm" id="cli-next" aria-label="Mes siguiente">›</button>
         <button class="btn btn-sm btn-fantasma" id="cli-hoy">Este mes</button>
         <span class="espacio"></span>
-        <input id="cli-buscar" type="search" placeholder="Buscar cliente…" style="width:200px" aria-label="Buscar cliente">
+        <input id="cli-buscar" type="search" placeholder="🔍 Buscar cliente…" title="Busca por nombre, dirección o teléfono" style="width:200px" aria-label="Buscar cliente">
+        <select id="cli-orden" aria-label="Ordenar" style="width:auto">
+          <option value="az">Orden: A → Z</option><option value="za">Orden: Z → A</option><option value="horas">Más horas</option><option value="visitas">Más visitas</option><option value="cobrado">Más cobrado en efectivo</option></select>
         <select id="cli-filtro" aria-label="Mostrar" style="width:auto">
           <option value="mes">Con visitas este mes</option><option value="todos">Todos los clientes</option></select>
         <button class="btn btn-sm btn-primario" id="cli-xls">Descargar Excel del mes</button>
@@ -672,6 +727,7 @@
     $("#cli-hoy").onclick = () => { estado.cliMes = inicioMes(new Date()); pintarClientes(); };
     $("#cli-buscar").oninput = () => pintarTablaClientes();
     $("#cli-filtro").onchange = () => pintarTablaClientes();
+    $("#cli-orden").onchange = () => pintarTablaClientes();
     $("#cli-xls").onclick = async (e) => {
       e.target.disabled = true;
       try { await excelClientesMes(); } catch (err) { aviso("No se pudo generar el Excel: " + (err.message || err), true); }
@@ -711,9 +767,18 @@
     const filtro = $("#cli-filtro")?.value || "mes";
     const todos = statsClientes();
     const lista = todos
-      .filter((s) => !q || s.c.nombre.toLowerCase().includes(q) || (s.c.direccion || "").toLowerCase().includes(q))
+      .filter((s) => !q || normal(s.c.nombre).includes(normal(q)) || normal(s.c.direccion).includes(normal(q)) || normal(s.c.telefono).includes(normal(q)))
       .filter((s) => filtro === "todos" || s.visitas > 0)
-      .sort((a, b) => (b.min - a.min) || a.c.nombre.localeCompare(b.c.nombre, "es"));
+      .sort((a, b) => {
+        const az = a.c.nombre.localeCompare(b.c.nombre, "es", { sensitivity: "base" });
+        switch ($("#cli-orden")?.value || "az") {
+          case "za": return -az;
+          case "horas": return (b.min - a.min) || az;
+          case "visitas": return (b.visitas - a.visitas) || az;
+          case "cobrado": return (b.cobrado - a.cobrado) || az;
+          default: return az;
+        }
+      });
     const T = todos.reduce((a, s) => ({ min: a.min + s.min, vis: a.vis + s.visitas, cob: a.cob + s.cobrado, conCob: a.conCob + (s.cobrado ? 1 : 0) }), { min: 0, vis: 0, cob: 0, conCob: 0 });
     $("#cli-resumen").innerHTML = `
       <div class="dato"><div class="etq">Horas del mes</div><div class="val">${fmtMin(T.min)}</div><div class="sub">${num2(T.min / 60)} h decimales</div></div>
