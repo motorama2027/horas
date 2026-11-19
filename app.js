@@ -1513,7 +1513,7 @@
     return String(v);
   }
 
-  function renderHoja(ws) {
+  function renderHoja(ws, imprimir = false) {
     const nCols = Math.max(1, ws.columnCount), nFilas = ws.rowCount;
     const anchos = Array.from({ length: nCols }, (_, i) => Math.round((ws.getColumn(i + 1).width || 9) * 7.2));
     const rejilla = ws.views?.[0]?.showGridLines !== false;
@@ -1525,7 +1525,9 @@
     });
     const cortes = new Set((ws.rowBreaks || []).map((b) => b.id));
     const linea = (b) => (!b || !b.style ? "" : `${b.style === "medium" || b.style === "thick" ? 2 : 1}px solid #444`);
-    const colgroup = `<colgroup>${anchos.map((w) => `<col style="width:${w}px">`).join("")}</colgroup>`;
+    const total = anchos.reduce((a, w) => a + w, 0);
+    // Al imprimir, las columnas van en % para que la hoja ocupe todo el ancho del A4
+    const colgroup = `<colgroup>${anchos.map((w) => `<col style="width:${imprimir ? ((w / total) * 100).toFixed(2) + "%" : w + "px"}">`).join("")}</colgroup>`;
     let paginas = [], filas = "";
     for (let r = 1; r <= nFilas; r++) {
       const row = ws.getRow(r);
@@ -1557,6 +1559,8 @@
     }
     if (filas) paginas.push(filas);
     const vertical = ws.pageSetup?.orientation !== "landscape";
+    if (imprimir) return paginas.map((f) => `<section class="hoja">
+      <table class="${rejilla ? "con-rejilla" : ""}">${colgroup}<tbody>${f}</tbody></table></section>`).join("");
     return paginas.map((f, i) => `<div class="previa-pagina ${vertical ? "vertical" : "horizontal"}">
       <table class="previa-tabla ${rejilla ? "con-rejilla" : ""}">${colgroup}<tbody>${f}</tbody></table>
       <div class="previa-num">Página ${i + 1} de ${paginas.length}</div></div>`).join("");
@@ -1573,10 +1577,14 @@
       <div class="acciones">
         ${volver ? `<button type="button" class="btn izq" id="pv-volver">${esc(textoVolver)}</button>` : ""}
         <button type="button" class="btn" data-cerrar>Cerrar</button>
+        ${hojas.length > 1 ? `<button type="button" class="btn" id="pv-imp-todas">🖨 Imprimir todas</button>` : ""}
+        <button type="button" class="btn" id="pv-imp">🖨 Imprimir${hojas.length > 1 ? " esta" : ""}</button>
         <button type="button" class="btn btn-primario" id="pv-bajar">Descargar Excel</button>
       </div>`);
     $("#modal .modal-caja").classList.add("modal-ancha");
+    let actual = 0;
     const ver = (i) => {
+      actual = i;
       $("#previa").innerHTML = renderHoja(hojas[i]);
       document.querySelectorAll("[data-hoja]").forEach((b) => b.classList.toggle("btn-primario", Number(b.dataset.hoja) === i));
       $("#previa").scrollTop = 0;
@@ -1584,11 +1592,41 @@
     document.querySelectorAll("[data-hoja]").forEach((b) => (b.onclick = () => ver(Number(b.dataset.hoja))));
     ver(0);
     if (volver) $("#pv-volver").onclick = volver;
+    $("#pv-imp").onclick = () => imprimirHojas([hojas[actual]], libro.nombre);
+    if (hojas.length > 1) $("#pv-imp-todas").onclick = () => imprimirHojas(hojas, libro.nombre);
     $("#pv-bajar").onclick = async () => {
       $("#pv-bajar").disabled = true;
       guardarLibro(await libro.wb.xlsx.writeBuffer(), libro.nombre);
       cerrarModal();
     };
+  }
+
+  // Imprime las hojas tal como salen en el Excel (A4, una página por semana)
+  function imprimirHojas(hojas, nombre) {
+    const vertical = hojas[0]?.pageSetup?.orientation !== "landscape";
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${esc(nombre.replace(/\.xlsx$/, ""))}</title>
+      <style>
+        @page { size: A4 ${vertical ? "portrait" : "landscape"}; margin: 10mm; }
+        * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
+        html, body { margin: 0; background: #fff; color: #111; font-family: Calibri, "Segoe UI", Arial, sans-serif; }
+        .hoja { width: 100%; page-break-after: always; break-after: page; }
+        .hoja:last-child { page-break-after: auto; break-after: auto; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11.5px; }
+        td { padding: 2px 4px; white-space: nowrap; overflow: visible; height: 19px; border: 0; }
+        table.con-rejilla td { border: 1px solid #e3e6ea; }
+        tr { page-break-inside: avoid; }
+      </style></head><body>${hojas.map((ws) => renderHoja(ws, true)).join("")}</body></html>`;
+    const ifr = document.createElement("iframe");
+    ifr.setAttribute("aria-hidden", "true");
+    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    document.body.appendChild(ifr);
+    const doc = ifr.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+    setTimeout(() => {
+      try { ifr.contentWindow.focus(); ifr.contentWindow.print(); }
+      catch (e) { aviso("No se pudo abrir la impresión: " + e.message, true); }
+      setTimeout(() => ifr.remove(), 60000);
+    }, 300);
   }
 
   function descargarCSV(nombre, filas) {
