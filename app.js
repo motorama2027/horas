@@ -653,10 +653,18 @@
       <div class="dato"><div class="etq">Diferencia</div><div class="val ${totGen - totObj >= 0 ? "dif-pos" : "dif-neg"}">${totGen - totObj >= 0 ? "+" : ""}${fmtH(totGen - totObj)}</div><div class="sub">horas extra o pendientes</div></div>
       <div class="dato"><div class="etq">Sin apuntar L–V</div><div class="val">${sinApuntar.length}</div><div class="sub">${sinApuntar.map((p) => esc(p.nombre || p.usuario)).join(", ") || "todos al día"}</div></div>`;
 
-    // Detalle por persona: entradas y salidas de cada día
-    $("#inf-detalle").innerHTML = filas.filter((f) => dias.some((d) => mapa.has(`${f.p.id}|${ymd(d)}`))).map(({ p, t }) => `
-      <div class="detalle-persona">
-        <h3>${esc(nombreDe(p))} <span class="muted num" style="font-weight:500">${fmtH(t)} esta semana</span></h3>
+    // Ficha semanal de cada persona: entradas y salidas de cada día, con descarga e impresión individual
+    $("#inf-detalle").innerHTML = `<h2 class="no-imprimir">Fichas semanales por persona</h2>` + filas.map(({ p, t }) => {
+      const obj = Number(p.horas_semanales) || 0, dif = t - obj;
+      return `
+      <div class="detalle-persona tarjeta" data-persona="${p.id}">
+        <div class="barra">
+          <h3>${esc(nombreDe(p))} <span class="muted" style="font-weight:500">${esc(p.puesto)}</span></h3>
+          <span class="espacio"></span>
+          <span class="no-imprimir"><button class="btn btn-sm" data-csv="${p.id}">Descargar Excel</button>
+          <button class="btn btn-sm" data-imprimir="${p.id}">Imprimir / PDF</button></span>
+        </div>
+        <p class="solo-imprimir">Registro de jornada · ${esc(rangoSemana(lunes))} (semana ${numSemana(lunes)})${p.dni ? " · DNI/NIE " + esc(p.dni) : ""}</p>
         <div class="tabla-envoltura"><table>
           <thead><tr><th>Día</th><th>Tipo</th><th>Turno 1</th><th>Turno 2</th><th class="num">Descanso</th><th class="num">Horas</th><th>Nota</th></tr></thead>
           <tbody>${dias.map((d) => {
@@ -667,8 +675,45 @@
             return `<tr><td class="${esFinde(d) ? "finde" : ""}">${diaCorto(d)}</td><td><span class="chip chip-${r.tipo}">${TIPOS[r.tipo]}</span></td>
               <td class="num" style="text-align:left">${t1}</td><td class="num" style="text-align:left">${t2}</td>
               <td class="num">${r.pausa_min ? r.pausa_min + " min" : "—"}</td><td class="num"><b>${fmtH(r.horas)}</b></td><td>${esc(r.nota)}</td></tr>`;
-          }).join("")}</tbody></table></div>
-      </div>`).join("");
+          }).join("")}</tbody>
+          <tfoot><tr><td colspan="5">Total semana · contrato ${fmtH(obj)} · diferencia <span class="${dif >= 0 ? "dif-pos" : "dif-neg"}">${dif >= 0 ? "+" : ""}${fmtH(dif)}</span></td>
+            <td class="num">${fmtH(t)}</td><td></td></tr></tfoot></table></div>
+        <div class="firmas solo-imprimir"><div>Firma del trabajador</div><div>Firma de la empresa</div></div>
+      </div>`;
+    }).join("");
+
+    const fichaCSV = (p) => {
+      let t = 0;
+      const filasDia = dias.map((d) => {
+        const r = mapa.get(`${p.id}|${ymd(d)}`);
+        if (!r) return [diaCorto(d), ymd(d), "", "", "", "", "", "", "", ""];
+        t += Number(r.horas);
+        return [diaCorto(d), ymd(d), TIPOS[r.tipo], hm(r.entrada1), hm(r.salida1), hm(r.entrada2), hm(r.salida2), r.pausa_min || "", fmtDec(r.horas), r.nota];
+      });
+      const obj = Number(p.horas_semanales) || 0;
+      return [
+        ["Registro de jornada", nombreDe(p)],
+        ["Puesto", p.puesto], ["DNI/NIE", p.dni],
+        ["Semana", `${numSemana(lunes)} · ${rangoSemana(lunes)}`],
+        [],
+        ["Día", "Fecha", "Tipo", "Entrada 1", "Salida 1", "Entrada 2", "Salida 2", "Descanso (min)", "Horas", "Nota"],
+        ...filasDia,
+        [],
+        ["Total semana", "", "", "", "", "", "", "", fmtDec(t)],
+        ["Horas de contrato", "", "", "", "", "", "", "", fmtDec(obj)],
+        ["Diferencia", "", "", "", "", "", "", "", fmtDec(t - obj)],
+      ];
+    };
+    document.querySelectorAll("[data-csv]").forEach((b) => (b.onclick = () => {
+      const p = estado.perfiles.find((x) => x.id === b.dataset.csv);
+      descargarCSV(`ficha_${p.usuario}_semana_${ymd(lunes)}.csv`, fichaCSV(p));
+    }));
+    document.querySelectorAll("[data-imprimir]").forEach((b) => (b.onclick = () => {
+      document.querySelectorAll(".detalle-persona").forEach((el) => el.classList.toggle("seleccionada", el.dataset.persona === b.dataset.imprimir));
+      document.body.classList.add("imprimir-ficha");
+      window.print();
+      setTimeout(() => document.body.classList.remove("imprimir-ficha"), 500);
+    }));
 
     // Histórico de las últimas 8 semanas
     const lunesHist = Array.from({ length: 8 }, (_, i) => sumarDias(lunes, -7 * (7 - i)));
@@ -711,6 +756,17 @@
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
+  }
+
+  function descargarCSV(nombre, filas) {
+    const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+    const texto = filas.map((f) => f.map(q).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + texto], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   // ================================================================ INICIO
