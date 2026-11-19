@@ -313,25 +313,30 @@
     return estado.calUsuario === estado.yo.id ? estado.yo : estado.perfiles.find((p) => p.id === estado.calUsuario) || estado.yo;
   }
 
+  const OTRO = "__otro";
   function opcionesClientes(sel) {
     const lista = estado.clientes.filter((c) => c.activo || String(c.id) === String(sel));
-    return `<option value="">— Elige cliente —</option>` + lista.map((c) => `<option value="${c.id}" ${String(c.id) === String(sel) ? "selected" : ""}>${esc(c.nombre)}</option>`).join("");
+    return `<option value="">— Elige cliente —</option>`
+      + lista.map((c) => `<option value="${c.id}" ${String(c.id) === String(sel) ? "selected" : ""}>${esc(c.nombre)}</option>`).join("")
+      + `<option value="${OTRO}" ${sel === OTRO ? "selected" : ""}>✏️ No está en la lista: escribirlo</option>`;
   }
 
   function lineaHTML(t) {
     const min = t ? Number(t.minutos) : 0;
     const h = t ? Math.floor(min / 60) : "", m = t ? min % 60 : 0;
     const opcionesMin = Array.from({ length: 12 }, (_, i) => i * 5).map((v) => `<option value="${v}" ${v === m ? "selected" : ""}>${String(v).padStart(2, "0")}</option>`).join("");
-    const sinLista = t && !t.cliente_id ? `<span class="l-aviso">Escrito a mano: «${esc(t.cliente)}». Elige el cliente de la lista.</span>` : "";
+    const aMano = t && !t.cliente_id;
+    const otro = `<input class="l-otro" maxlength="80" placeholder="Escribe el cliente como lo conozcas (ej. casa del perro)" aria-label="Cliente escrito a mano" value="${aMano ? esc(t.cliente) : ""}" ${aMano ? "" : "hidden"}>`;
     return `<div class="linea" data-id="${t ? t.id : ""}">
-      <select class="l-cli" aria-label="Cliente">${opcionesClientes(t?.cliente_id)}</select>
+      <select class="l-cli" aria-label="Cliente">${opcionesClientes(aMano ? OTRO : t?.cliente_id)}</select>
+      ${otro}
       <span class="l-tiempo">
         <input class="l-h" type="number" inputmode="numeric" min="0" max="16" placeholder="0" aria-label="Horas" value="${h}"><span class="muted">h</span>
         <select class="l-m" aria-label="Minutos">${opcionesMin}</select><span class="muted">min</span>
       </span>
       <label class="l-cobro"><span class="muted">Cobrado</span><input class="l-eur" type="number" inputmode="decimal" min="0" step="0.5" placeholder="0" aria-label="Cobrado en esta casa (€)" value="${t && Number(t.cobrado) ? num2(t.cobrado).replace(",", ".") : ""}"><span class="muted">€</span></label>
       <button type="button" class="btn btn-sm btn-fantasma l-borrar" aria-label="Quitar">✕</button>
-      ${sinLista}<span class="l-estado"></span>
+      <span class="l-estado"></span>
     </div>`;
   }
 
@@ -376,6 +381,11 @@
   }
 
   function prepararLinea(el) {
+    el.querySelector(".l-cli").addEventListener("input", (e) => {
+      const o = el.querySelector(".l-otro");
+      o.hidden = e.target.value !== OTRO;
+      if (!o.hidden) setTimeout(() => o.focus(), 0);
+    });
     el.addEventListener("change", (e) => { if (!e.target.classList.contains("l-borrar")) encolar(el, guardarLinea); });
     el.querySelector(".l-borrar").onclick = () => encolar(el, borrarLinea);
   }
@@ -396,24 +406,30 @@
   async function guardarLinea(el) {
     const fecha = el.closest(".dia-card").dataset.fecha;
     const clienteId = el.querySelector(".l-cli").value;
+    const esOtro = clienteId === OTRO;
+    const otroInp = el.querySelector(".l-otro");
+    otroInp.hidden = !esOtro;
+    const textoOtro = otroInp.value.trim();
     const minutos = (parseInt(el.querySelector(".l-h").value, 10) || 0) * 60 + (parseInt(el.querySelector(".l-m").value, 10) || 0);
     const cobrado = Math.max(0, Math.round((parseFloat(String(el.querySelector(".l-eur").value).replace(",", ".")) || 0) * 100) / 100);
     const id = el.dataset.id;
     if (!clienteId && !minutos && !cobrado) { if (id) return borrarLinea(el, true); return marcarLinea(el, ""); }
     if (!clienteId) return marcarLinea(el, "Elige el cliente", true);
+    if (esOtro && !textoOtro) { otroInp.focus(); return marcarLinea(el, "Escribe el nombre del cliente", true); }
     if (!minutos) return marcarLinea(el, "Falta el tiempo", true);
     if (minutos > 16 * 60) return marcarLinea(el, "Máximo 16 h", true);
-    const cli = clientePorId(clienteId);
+    const cli = esOtro ? null : clientePorId(clienteId);
     const ant = id ? estado.trabajos.get(id) : null;
-    if (ant && String(ant.cliente_id) === String(clienteId) && Number(ant.minutos) === minutos && Number(ant.cobrado) === cobrado) return;
-    const valores = { cliente_id: Number(clienteId), cliente: cli ? cli.nombre : "", minutos, cobrado };
+    const valores = esOtro
+      ? { cliente_id: null, cliente: textoOtro, minutos, cobrado }
+      : { cliente_id: Number(clienteId), cliente: cli ? cli.nombre : "", minutos, cobrado };
+    if (ant && String(ant.cliente_id ?? "") === String(valores.cliente_id ?? "") && ant.cliente === valores.cliente && Number(ant.minutos) === minutos && Number(ant.cobrado) === cobrado) return;
     const res = id
       ? await sb.from("trabajos").update(valores).eq("id", id).select().single()
       : await sb.from("trabajos").insert({ ...valores, usuario_id: perfilCal().id, fecha }).select().single();
     if (res.error) return marcarLinea(el, errorTxt(res.error), true);
     el.dataset.id = res.data.id;
     estado.trabajos.set(String(res.data.id), res.data);
-    el.querySelector(".l-aviso")?.remove();
     marcarLinea(el, "✓");
     pintarTotales();
   }
@@ -428,7 +444,7 @@
     const lineas = el.parentElement;
     if (mantener || lineas.children.length === 1) {
       el.dataset.id = ""; el.querySelector(".l-cli").value = ""; el.querySelector(".l-h").value = ""; el.querySelector(".l-m").value = "0"; el.querySelector(".l-eur").value = "";
-      el.querySelector(".l-aviso")?.remove();
+      el.querySelector(".l-otro").value = ""; el.querySelector(".l-otro").hidden = true;
       marcarLinea(el, id ? "Borrado" : "");
     } else el.remove();
     pintarTotales();
@@ -682,7 +698,7 @@
       let s = t.cliente_id ? st.get(String(t.cliente_id)) : null;
       if (!s) {
         const k = "x:" + t.cliente.trim().toLowerCase();
-        s = sueltos.get(k) || nuevo({ id: null, nombre: t.cliente.trim() + " (sin ficha)", direccion: "", telefono: "", activo: true });
+        s = sueltos.get(k) || nuevo({ id: null, nombre: t.cliente.trim() + " (escrito a mano)", nombreOriginal: t.cliente.trim(), direccion: "", telefono: "", activo: true });
         sueltos.set(k, s);
       }
       s.min += Number(t.minutos); s.visitas++; s.cobrado += Number(t.cobrado) || 0; s.gente.add(t.usuario_id); s.lista.push(t);
@@ -707,17 +723,61 @@
     const cero = '<span class="cero">·</span>';
     $("#cli-tabla").innerHTML = `<table>
       <thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Horas</th><th class="num">Visitas</th><th class="num">Cobrado en efectivo</th><th>Quién ha ido</th><th>Estado</th></tr></thead>
-      <tbody>${lista.map((s) => `<tr class="${s.c.id ? "fila-click" : ""}" data-cli="${s.c.id ?? ""}">
+      <tbody>${lista.map((s) => `<tr class="fila-click" data-cli="${s.c.id ?? ""}" data-suelto="${s.c.id ? "" : esc(s.c.nombreOriginal)}">
         <td><b>${esc(s.c.nombre)}</b>${s.c.direccion ? `<div class="muted" style="font-size:.78rem">${esc(s.c.direccion)}</div>` : ""}</td>
         <td class="muted">${esc(s.c.telefono) || "—"}</td>
         <td class="num">${s.min ? fmtMin(s.min) : cero}</td><td class="num">${s.visitas || cero}</td>
         <td class="num"><b>${s.cobrado ? eur(s.cobrado) : cero}</b></td>
         <td class="muted">${[...s.gente].map((id) => esc(nombreDe(estado.perfiles.find((p) => p.id === id)))).join(", ")}</td>
-        <td>${s.c.id ? `<span class="chip ${s.c.activo ? "chip-activo" : "chip-inactivo"}">${s.c.activo ? "Activo" : "Inactivo"}</span>` : '<span class="chip chip-ausencia">Sin ficha</span>'}</td></tr>`).join("")
+        <td>${s.c.id ? `<span class="chip ${s.c.activo ? "chip-activo" : "chip-inactivo"}">${s.c.activo ? "Activo" : "Inactivo"}</span>` : '<span class="chip chip-ausencia">Sin ficha · asignar</span>'}</td></tr>`).join("")
         || `<tr><td colspan="7" class="vacio">${q ? "Ningún cliente coincide con la búsqueda." : filtro === "mes" ? "Ningún cliente tiene visitas este mes. Cambia a «Todos los clientes» para verlos." : "No hay clientes. Pulsa «+ Nuevo cliente» o «Pegar lista»."}</td></tr>`}</tbody>
       ${lista.length > 1 ? `<tfoot><tr><td>Total</td><td></td><td class="num">${fmtMin(T.min)}</td><td class="num">${T.vis}</td><td class="num">${eur(T.cob)}</td><td></td><td></td></tr></tfoot>` : ""}
     </table>`;
-    document.querySelectorAll("tr[data-cli]").forEach((tr) => { if (tr.dataset.cli) tr.onclick = () => editarCliente(tr.dataset.cli); });
+    document.querySelectorAll("tr[data-cli]").forEach((tr) => { tr.onclick = () => (tr.dataset.cli ? editarCliente(tr.dataset.cli) : asignarSuelto(tr.dataset.suelto)); });
+  }
+
+  // Cliente escrito a mano por una trabajadora: asignarlo a un cliente existente o crear su ficha
+  function asignarSuelto(nombre) {
+    const s = statsClientes().find((x) => !x.c.id && x.c.nombreOriginal === nombre);
+    if (!s) return;
+    const opts = estado.clientes.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("");
+    abrirModal("Asignar cliente", `
+      <form id="form-suelto">
+        <p style="margin:0">Las trabajadoras han apuntado <b>«${esc(nombre)}»</b>: ${s.visitas} ${s.visitas === 1 ? "visita" : "visitas"} y ${fmtMin(s.min)} h este mes
+          (${[...s.gente].map((id) => esc(nombreDe(estado.perfiles.find((p) => p.id === id)))).join(", ")}).</p>
+        <label for="su-modo">¿Qué es?</label>
+        <select id="su-modo"><option value="existe">Es un cliente que ya tengo en la lista</option><option value="nuevo">Es un cliente nuevo: crear su ficha</option></select>
+        <div id="su-existe"><label for="su-cli">Cliente</label><select id="su-cli"><option value="">— Elige cliente —</option>${opts}</select></div>
+        <div id="su-nuevo" hidden><label for="su-nom">Nombre del cliente nuevo</label><input id="su-nom" maxlength="80" value="${esc(nombre)}"></div>
+        <p class="muted" style="font-size:.85rem">Se pasarán a ese cliente todas las líneas escritas como «${esc(nombre)}», también las de otros meses.</p>
+        <p class="error" id="su-error"></p>
+        <div class="acciones"><button type="button" class="btn" data-cerrar>Cancelar</button><button type="submit" class="btn btn-primario" id="su-btn">Guardar</button></div>
+      </form>`);
+    $("#su-modo").onchange = () => { const n = $("#su-modo").value === "nuevo"; $("#su-existe").hidden = n; $("#su-nuevo").hidden = !n; };
+    $("#form-suelto").onsubmit = async (e) => {
+      e.preventDefault();
+      $("#su-btn").disabled = true;
+      try {
+        let cli;
+        if ($("#su-modo").value === "nuevo") {
+          const nom = $("#su-nom").value.trim();
+          if (!nom) throw new Error("Pon el nombre del cliente.");
+          const r = await sb.from("clientes").insert({ nombre: nom }).select().single();
+          if (r.error) throw new Error(/duplicate|unique/i.test(r.error.message) ? "Ya hay un cliente con ese nombre: elige «Es un cliente que ya tengo en la lista»." : errorTxt(r.error));
+          cli = r.data;
+        } else {
+          cli = clientePorId($("#su-cli").value);
+          if (!cli) throw new Error("Elige el cliente de la lista.");
+        }
+        const patron = nombre.replace(/[\\%_]/g, (m) => "\\" + m);
+        const { error } = await sb.from("trabajos").update({ cliente_id: cli.id, cliente: cli.nombre }).is("cliente_id", null).ilike("cliente", patron);
+        if (error) throw new Error(errorTxt(error));
+        cerrarModal(); aviso(`«${nombre}» pasado a ${cli.nombre}`);
+        await cargarListaClientes(); pintarClientes();
+      } catch (err) {
+        $("#su-error").textContent = err.message; $("#su-btn").disabled = false;
+      }
+    };
   }
 
   function editarCliente(id) {
