@@ -236,7 +236,7 @@
 
   function secciones() {
     const s = [["calendario", "Calendario"], ["ficha", "Mi ficha"]];
-    if (estado.yo?.es_admin) s.push(["clientes", "Clientes y facturación"], ["usuarios", "Usuarios"], ["informes", "Informes semanales"]);
+    if (estado.yo?.es_admin) s.push(["clientes", "Clientes"], ["usuarios", "Usuarios"], ["informes", "Informes semanales"]);
     return s;
   }
   function pintarNav() {
@@ -627,27 +627,12 @@
   }
 
   // ================================================================ CLIENTES Y FACTURACIÓN (master)
-  async function cargarTarifas() {
-    const { data, error } = await sb.from("tarifas").select("*");
-    estado.tarifas = new Map((error ? [] : data).map((t) => [String(t.cliente_id), t]));
-  }
-  const tarifaDe = (id) => estado.tarifas?.get(String(id)) || null;
-  const tarifaTxt = (t) => (!t || !Number(t.importe) ? "" : `${eur(t.importe)}${t.tipo === "servicio" ? "/servicio" : "/h"}`);
-  const precioTrab = (uid) => Number(estado.perfiles.find((p) => p.id === uid)?.precio_hora) || 0;
   const r2 = (x) => Math.round(x * 100) / 100;
-  // Importe a facturar de una visita según la tarifa del cliente
-  const importeVisita = (t) => {
-    const ta = tarifaDe(t.cliente_id);
-    if (!ta) return 0;
-    return r2(ta.tipo === "servicio" ? Number(ta.importe) : (Number(t.minutos) / 60) * Number(ta.importe));
-  };
-  // Coste de una visita: tiempo × precio por hora de la trabajadora
-  const costeVisita = (t) => r2((Number(t.minutos) / 60) * precioTrab(t.usuario_id));
 
   async function vistaClientes() {
-    await Promise.all([cargarListaClientes(), cargarPerfiles(), cargarTarifas()]);
+    await Promise.all([cargarListaClientes(), cargarPerfiles()]);
     $("#contenido").innerHTML = `
-      <div class="barra"><h1>Clientes y facturación</h1><span class="espacio"></span>
+      <div class="barra"><h1>Clientes</h1><span class="espacio"></span>
         <button class="btn" id="cli-pegar">Pegar lista</button>
         <button class="btn btn-primario" id="cli-nuevo">+ Nuevo cliente</button></div>
       <div class="barra">
@@ -658,13 +643,12 @@
         <span class="espacio"></span>
         <input id="cli-buscar" type="search" placeholder="Buscar cliente…" style="width:200px" aria-label="Buscar cliente">
         <select id="cli-filtro" aria-label="Mostrar" style="width:auto">
-          <option value="mes">Con visitas este mes</option><option value="todos">Todos los clientes</option><option value="sintarifa">Sin tarifa</option></select>
+          <option value="mes">Con visitas este mes</option><option value="todos">Todos los clientes</option></select>
         <button class="btn btn-sm btn-primario" id="cli-xls">Descargar Excel del mes</button>
       </div>
       <div class="resumen" id="cli-resumen"></div>
       <div class="tabla-envoltura" id="cli-tabla"></div>
-      <p class="muted">A facturar = horas × tarifa del cliente (o nº de servicios × precio, si cobras por servicio). Pendiente = a facturar − lo que la trabajadora ya cobró en mano.
-        Coste = horas × precio por hora de cada trabajadora. Pulsa un cliente para ver su ficha, su tarifa y sus visitas.</p>`;
+      <p class="muted">Pulsa un cliente para ver su ficha y sus visitas del mes. Desactivar un cliente lo quita de la lista de las trabajadoras pero conserva su historial.</p>`;
     $("#cli-nuevo").onclick = () => editarCliente(null);
     $("#cli-pegar").onclick = pegarClientes;
     $("#cli-prev").onclick = () => { estado.cliMes = new Date(estado.cliMes.getFullYear(), estado.cliMes.getMonth() - 1, 1); pintarClientes(); };
@@ -690,7 +674,7 @@
   }
 
   function statsClientes() {
-    const nuevo = (c) => ({ c, min: 0, visitas: 0, cobrado: 0, facturar: 0, coste: 0, gente: new Set(), lista: [] });
+    const nuevo = (c) => ({ c, min: 0, visitas: 0, cobrado: 0, gente: new Set(), lista: [] });
     const st = new Map();
     estado.clientes.forEach((c) => st.set(String(c.id), nuevo(c)));
     const sueltos = new Map();
@@ -702,14 +686,8 @@
         sueltos.set(k, s);
       }
       s.min += Number(t.minutos); s.visitas++; s.cobrado += Number(t.cobrado) || 0; s.gente.add(t.usuario_id); s.lista.push(t);
-      s.facturar += importeVisita(t); s.coste += costeVisita(t);
     });
-    return [...st.values(), ...sueltos.values()].map((s) => {
-      s.facturar = r2(s.facturar); s.coste = r2(s.coste); s.cobrado = r2(s.cobrado);
-      s.pendiente = r2(s.facturar - s.cobrado); s.margen = r2(s.facturar - s.coste);
-      s.tarifa = s.c.id ? tarifaDe(s.c.id) : null;
-      return s;
-    });
+    return [...st.values(), ...sueltos.values()].map((s) => { s.cobrado = r2(s.cobrado); return s; });
   }
 
   function pintarTablaClientes() {
@@ -718,38 +696,32 @@
     const todos = statsClientes();
     const lista = todos
       .filter((s) => !q || s.c.nombre.toLowerCase().includes(q) || (s.c.direccion || "").toLowerCase().includes(q))
-      .filter((s) => filtro === "todos" ? true : filtro === "sintarifa" ? (s.c.id && !Number(s.tarifa?.importe)) : s.visitas > 0)
-      .sort((a, b) => (b.facturar - a.facturar) || (b.min - a.min) || a.c.nombre.localeCompare(b.c.nombre, "es"));
-    const T = todos.reduce((a, s) => ({ min: a.min + s.min, vis: a.vis + s.visitas, fac: a.fac + s.facturar, cob: a.cob + s.cobrado, cos: a.cos + s.coste }), { min: 0, vis: 0, fac: 0, cob: 0, cos: 0 });
-    const sinTarifa = todos.filter((s) => s.visitas && !Number(s.tarifa?.importe));
+      .filter((s) => filtro === "todos" || s.visitas > 0)
+      .sort((a, b) => (b.min - a.min) || a.c.nombre.localeCompare(b.c.nombre, "es"));
+    const T = todos.reduce((a, s) => ({ min: a.min + s.min, vis: a.vis + s.visitas, cob: a.cob + s.cobrado, conCob: a.conCob + (s.cobrado ? 1 : 0) }), { min: 0, vis: 0, cob: 0, conCob: 0 });
     $("#cli-resumen").innerHTML = `
-      <div class="dato"><div class="etq">A facturar</div><div class="val">${eur(T.fac)}</div><div class="sub">${fmtMin(T.min)} h · ${T.vis} visitas</div></div>
-      <div class="dato"><div class="etq">Cobrado en mano</div><div class="val">${eur(T.cob)}</div><div class="sub">por las trabajadoras</div></div>
-      <div class="dato"><div class="etq">Pendiente de cobrar</div><div class="val">${eur(T.fac - T.cob)}</div><div class="sub">${sinTarifa.length ? `<span class="dif-neg">${sinTarifa.length} clientes sin tarifa</span>` : "a facturar − cobrado"}</div></div>
-      <div class="dato"><div class="etq">Margen</div><div class="val ${T.fac - T.cos >= 0 ? "dif-pos" : "dif-neg"}">${eur(T.fac - T.cos)}</div><div class="sub">coste trabajadoras ${eur(T.cos)}${T.fac ? " · " + Math.round(((T.fac - T.cos) / T.fac) * 100) + " %" : ""}</div></div>`;
+      <div class="dato"><div class="etq">Horas del mes</div><div class="val">${fmtMin(T.min)}</div><div class="sub">${num2(T.min / 60)} h decimales</div></div>
+      <div class="dato"><div class="etq">Visitas</div><div class="val">${T.vis}</div><div class="sub">${todos.filter((s) => s.visitas).length} clientes distintos</div></div>
+      <div class="dato"><div class="etq">Cobrado en efectivo</div><div class="val">${eur(T.cob)}</div><div class="sub">${T.conCob} clientes han pagado en mano</div></div>
+      <div class="dato"><div class="etq">Clientes activos</div><div class="val">${estado.clientes.filter((c) => c.activo).length}</div><div class="sub">en la lista de las trabajadoras</div></div>`;
     const cero = '<span class="cero">·</span>';
     $("#cli-tabla").innerHTML = `<table>
-      <thead><tr><th>Cliente</th><th class="num">Horas</th><th class="num">Visitas</th><th class="num">Tarifa</th><th class="num">A facturar</th>
-        <th class="num">Cobrado</th><th class="num">Pendiente</th><th class="num">Coste</th><th class="num">Margen</th><th>Estado</th></tr></thead>
+      <thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Horas</th><th class="num">Visitas</th><th class="num">Cobrado en efectivo</th><th>Quién ha ido</th><th>Estado</th></tr></thead>
       <tbody>${lista.map((s) => `<tr class="${s.c.id ? "fila-click" : ""}" data-cli="${s.c.id ?? ""}">
         <td><b>${esc(s.c.nombre)}</b>${s.c.direccion ? `<div class="muted" style="font-size:.78rem">${esc(s.c.direccion)}</div>` : ""}</td>
+        <td class="muted">${esc(s.c.telefono) || "—"}</td>
         <td class="num">${s.min ? fmtMin(s.min) : cero}</td><td class="num">${s.visitas || cero}</td>
-        <td class="num">${tarifaTxt(s.tarifa) || (s.c.id ? '<span class="chip chip-ausencia">Sin tarifa</span>' : cero)}</td>
-        <td class="num"><b>${s.facturar ? eur(s.facturar) : cero}</b></td>
-        <td class="num">${s.cobrado ? eur(s.cobrado) : cero}</td>
-        <td class="num">${s.visitas ? eur(s.pendiente) : cero}</td>
-        <td class="num muted">${s.coste ? eur(s.coste) : cero}</td>
-        <td class="num ${s.margen >= 0 ? "dif-pos" : "dif-neg"}">${s.visitas ? eur(s.margen) : cero}</td>
+        <td class="num"><b>${s.cobrado ? eur(s.cobrado) : cero}</b></td>
+        <td class="muted">${[...s.gente].map((id) => esc(nombreDe(estado.perfiles.find((p) => p.id === id)))).join(", ")}</td>
         <td>${s.c.id ? `<span class="chip ${s.c.activo ? "chip-activo" : "chip-inactivo"}">${s.c.activo ? "Activo" : "Inactivo"}</span>` : '<span class="chip chip-ausencia">Sin ficha</span>'}</td></tr>`).join("")
-        || `<tr><td colspan="10" class="vacio">${q ? "Ningún cliente coincide con la búsqueda." : filtro === "mes" ? "Ningún cliente tiene visitas este mes. Cambia a «Todos los clientes» para verlos." : "No hay clientes. Pulsa «+ Nuevo cliente» o «Pegar lista»."}</td></tr>`}</tbody>
-      ${lista.length > 1 ? `<tfoot><tr><td>Total</td><td class="num">${fmtMin(T.min)}</td><td class="num">${T.vis}</td><td></td><td class="num">${eur(T.fac)}</td><td class="num">${eur(T.cob)}</td><td class="num">${eur(T.fac - T.cob)}</td><td class="num">${eur(T.cos)}</td><td class="num">${eur(T.fac - T.cos)}</td><td></td></tr></tfoot>` : ""}
+        || `<tr><td colspan="7" class="vacio">${q ? "Ningún cliente coincide con la búsqueda." : filtro === "mes" ? "Ningún cliente tiene visitas este mes. Cambia a «Todos los clientes» para verlos." : "No hay clientes. Pulsa «+ Nuevo cliente» o «Pegar lista»."}</td></tr>`}</tbody>
+      ${lista.length > 1 ? `<tfoot><tr><td>Total</td><td></td><td class="num">${fmtMin(T.min)}</td><td class="num">${T.vis}</td><td class="num">${eur(T.cob)}</td><td></td><td></td></tr></tfoot>` : ""}
     </table>`;
     document.querySelectorAll("tr[data-cli]").forEach((tr) => { if (tr.dataset.cli) tr.onclick = () => editarCliente(tr.dataset.cli); });
   }
 
   function editarCliente(id) {
     const c = id ? clientePorId(id) : { nombre: "", direccion: "", telefono: "", notas: "", activo: true };
-    const ta = id ? tarifaDe(id) : null;
     const s = id ? statsClientes().find((x) => String(x.c.id) === String(id)) : null;
     const mes = estado.cliMes;
     abrirModal(id ? c.nombre : "Nuevo cliente", `
@@ -759,16 +731,11 @@
           <div class="ancho"><label for="c-dir">Dirección</label><input id="c-dir" value="${esc(c.direccion)}"></div>
           <div><label for="c-tel">Teléfono</label><input id="c-tel" type="tel" value="${esc(c.telefono)}"></div>
           <div><label for="c-activo">Estado</label><select id="c-activo"><option value="1" ${c.activo ? "selected" : ""}>Activo (sale en la lista)</option><option value="0" ${!c.activo ? "selected" : ""}>Inactivo</option></select></div>
-          <div><label for="c-ttipo">Cómo le cobras</label><select id="c-ttipo">
-            <option value="hora" ${ta?.tipo !== "servicio" ? "selected" : ""}>Por hora</option>
-            <option value="servicio" ${ta?.tipo === "servicio" ? "selected" : ""}>Precio fijo por servicio</option></select></div>
-          <div><label for="c-timp" id="c-timp-l">Tarifa (€)</label><input id="c-timp" type="number" min="0" step="0.5" value="${ta ? Number(ta.importe) : ""}" placeholder="0"></div>
           <div class="ancho"><label for="c-notas">Notas (llaves, horario, lo que haya que saber…)</label><textarea id="c-notas">${esc(c.notas)}</textarea></div>
         </div>
-        <p class="muted" style="font-size:.82rem;margin:6px 0 0">La tarifa solo la ves tú. Las trabajadoras no la ven.</p>
-        ${s ? `<h3 style="margin-top:18px">${MESES[mes.getMonth()][0].toUpperCase() + MESES[mes.getMonth()].slice(1)}: ${s.visitas} visitas · ${fmtMin(s.min)} h · a facturar ${eur(s.facturar)}${s.cobrado ? ` · cobrado ${eur(s.cobrado)} · pendiente ${eur(s.pendiente)}` : ""}</h3>
-          ${s.visitas ? `<div class="tabla-envoltura" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th>Quién</th><th class="num">Tiempo</th><th class="num">Importe</th><th class="num">Cobrado</th></tr></thead><tbody>
-          ${s.lista.map((t) => `<tr><td>${diaCorto(deYmd(t.fecha))}</td><td>${esc(nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)))}</td><td class="num">${fmtMin(t.minutos)}</td><td class="num">${eur(importeVisita(t))}</td><td class="num">${Number(t.cobrado) ? eur(t.cobrado) : "—"}</td></tr>`).join("")}
+        ${s ? `<h3 style="margin-top:18px">${MESES[mes.getMonth()][0].toUpperCase() + MESES[mes.getMonth()].slice(1)}: ${s.visitas} visitas · ${fmtMin(s.min)} h ${s.cobrado ? ` · cobrado en efectivo ${eur(s.cobrado)}` : ""}</h3>
+          ${s.visitas ? `<div class="tabla-envoltura" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th>Quién</th><th class="num">Tiempo</th><th class="num">Cobrado en efectivo</th></tr></thead><tbody>
+          ${s.lista.map((t) => `<tr><td>${diaCorto(deYmd(t.fecha))}</td><td>${esc(nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)))}</td><td class="num">${fmtMin(t.minutos)}</td><td class="num">${Number(t.cobrado) ? eur(t.cobrado) : "—"}</td></tr>`).join("")}
           </tbody></table></div>` : `<p class="muted">Sin visitas este mes.</p>`}` : ""}
         <p class="error" id="c-error"></p>
         <div class="acciones">
@@ -777,8 +744,6 @@
           <button type="submit" class="btn btn-primario">Guardar</button>
         </div>
       </form>`);
-    const etiqueta = () => ($("#c-timp-l").textContent = $("#c-ttipo").value === "servicio" ? "Precio por servicio (€)" : "Tarifa por hora (€)");
-    $("#c-ttipo").onchange = etiqueta; etiqueta();
     if (id) $("#c-borrar").onclick = async () => {
       if ($("#c-borrar").dataset.ok !== "1") {
         $("#c-borrar").dataset.ok = "1";
@@ -788,7 +753,7 @@
       }
       const { error } = await sb.from("clientes").delete().eq("id", id);
       if (error) return ($("#c-error").textContent = errorTxt(error));
-      cerrarModal(); aviso("Cliente borrado"); await Promise.all([cargarListaClientes(), cargarTarifas()]); pintarTablaClientes();
+      cerrarModal(); aviso("Cliente borrado"); await cargarListaClientes(); pintarTablaClientes();
     };
     $("#form-cli").onsubmit = async (e) => {
       e.preventDefault();
@@ -798,18 +763,15 @@
       if (res.error) return ($("#c-error").textContent = /duplicate|unique/i.test(res.error.message) ? "Ya hay un cliente con ese nombre." : errorTxt(res.error));
       const cid = res.data.id;
       if (id) await sb.from("trabajos").update({ cliente: v.nombre }).eq("cliente_id", id);
-      const imp = Math.max(0, parseFloat(String($("#c-timp").value).replace(",", ".")) || 0);
-      const { error: eT } = await sb.from("tarifas").upsert({ cliente_id: cid, tipo: $("#c-ttipo").value, importe: imp }, { onConflict: "cliente_id" });
-      if (eT) return ($("#c-error").textContent = "Cliente guardado, pero la tarifa no: " + errorTxt(eT));
-      cerrarModal(); aviso(id ? "Cliente guardado" : "Cliente creado"); await Promise.all([cargarListaClientes(), cargarTarifas()]); pintarTablaClientes();
+      cerrarModal(); aviso(id ? "Cliente guardado" : "Cliente creado"); await cargarListaClientes(); pintarTablaClientes();
     };
   }
 
   function pegarClientes() {
     abrirModal("Pegar lista de clientes", `
       <form id="form-pegar">
-        <label for="pg-lista">Un cliente por línea. Si quieres, añade dirección, teléfono y tarifa por hora separados por «;»</label>
-        <textarea id="pg-lista" style="min-height:220px;font-family:var(--f-num)" placeholder="Dolores; C/ Mayor 5; 600111222; 15&#10;Peluquería;;;18&#10;Escalera Sant Pere&#10;Duplex Roger de Flor"></textarea>
+        <label for="pg-lista">Un cliente por línea. Si quieres, añade la dirección y el teléfono separados por «;»</label>
+        <textarea id="pg-lista" style="min-height:220px;font-family:var(--f-num)" placeholder="Dolores; C/ Mayor 5; 600111222&#10;Peluquería&#10;Escalera Sant Pere&#10;Duplex Roger de Flor"></textarea>
         <p class="muted" id="pg-info" style="font-size:.85rem"></p>
         <p class="error" id="pg-error"></p>
         <div class="acciones"><button type="button" class="btn" data-cerrar>Cancelar</button>
@@ -821,7 +783,7 @@
       return $("#pg-lista").value.split(/\r?\n/).map((l) => l.split(/[;\t]/).map((x) => x.trim()))
         .filter(([n]) => n && n.length <= 80)
         .filter(([n]) => { const k = n.toLowerCase(); if (existentes.has(k) || vistos.has(k)) return false; vistos.add(k); return true; })
-        .map(([nombre, direccion = "", telefono = "", tarifa = ""]) => ({ nombre, direccion, telefono, tarifa: parseFloat(tarifa.replace(",", ".").replace("€", "")) || 0 }));
+        .map(([nombre, direccion = "", telefono = ""]) => ({ nombre, direccion, telefono }));
     };
     $("#pg-lista").oninput = () => { const n = leer().length; $("#pg-info").textContent = n ? `Se crearán ${n} clientes nuevos (los repetidos se saltan).` : ""; };
     $("#form-pegar").onsubmit = async (e) => {
@@ -829,11 +791,9 @@
       const filas = leer();
       if (!filas.length) return ($("#pg-error").textContent = "No hay clientes nuevos en la lista.");
       $("#pg-btn").disabled = true;
-      const { data, error } = await sb.from("clientes").insert(filas.map(({ tarifa, ...f }) => f)).select();
+      const { data, error } = await sb.from("clientes").insert(filas).select();
       if (error) { $("#pg-btn").disabled = false; return ($("#pg-error").textContent = errorTxt(error)); }
-      const tarifas = data.map((c) => ({ cliente_id: c.id, tipo: "hora", importe: filas.find((f) => f.nombre.toLowerCase() === c.nombre.toLowerCase())?.tarifa || 0 })).filter((t) => t.importe);
-      if (tarifas.length) await sb.from("tarifas").upsert(tarifas, { onConflict: "cliente_id" });
-      cerrarModal(); aviso(`${filas.length} clientes creados`); await Promise.all([cargarListaClientes(), cargarTarifas()]); pintarTablaClientes();
+      cerrarModal(); aviso(`${filas.length} clientes creados`); await cargarListaClientes(); pintarTablaClientes();
     };
   }
 
@@ -1283,7 +1243,7 @@
     return wb;
   }
 
-  // Excel mensual de facturación por cliente (sección Clientes)
+  // Excel mensual por cliente: horas, visitas y lo cobrado en efectivo (sección Clientes)
   async function excelClientesMes() {
     await cargarExcelJS();
     const mes = estado.cliMes;
@@ -1291,47 +1251,37 @@
     const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
     const EUR = '#,##0.00 "€"';
     const ps = { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
-    const cabecera = (fila) => { fila.font = { bold: true, color: { argb: "FFFFFFFF" } }; fila.eachCell((c) => { c.fill = fill("FF1F3A5F"); c.alignment = { vertical: "middle", wrapText: true }; }); fila.height = 30; };
+    const cabecera = (fila) => { fila.font = { bold: true, color: { argb: "FFFFFFFF" } }; fila.eachCell((c) => { c.fill = fill("FF1F3A5F"); c.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; }); fila.height = 30; };
     const lista = statsClientes().filter((s) => s.visitas).sort((a, b) => a.c.nombre.localeCompare(b.c.nombre, "es"));
     const titulo = `${CA_MESOS[mes.getMonth()]} ${mes.getFullYear()}`;
 
-    // Hoja 1: resumen por cliente
-    const res = wb.addWorksheet("Facturació", { pageSetup: ps, views: [{ state: "frozen", ySplit: 3 }] });
-    res.columns = [{ width: 28 }, { width: 8 }, { width: 8 }, { width: 17 }, { width: 13 }, { width: 12 }, { width: 13 }, { width: 12 }, { width: 12 }];
-    res.mergeCells("A1:I1"); res.getCell("A1").value = `FACTURACIÓ PER CLIENT · ${titulo}`; res.getCell("A1").font = { bold: true, size: 14 };
-    const cab = res.getRow(3);
-    cab.values = ["CLIENT", "HORES", "VISITES", "TARIFA", "A FACTURAR", "COBRAT EN MÀ", "PENDENT", "COST", "MARGE"];
-    cabecera(cab);
+    const res = wb.addWorksheet("Resum", { pageSetup: ps, views: [{ state: "frozen", ySplit: 3 }] });
+    res.columns = [{ width: 30 }, { width: 10 }, { width: 10 }, { width: 16 }, { width: 36 }];
+    res.mergeCells("A1:E1"); res.getCell("A1").value = `HORES PER CLIENT · ${titulo}`; res.getCell("A1").font = { bold: true, size: 14 };
+    const cab = res.getRow(3); cab.values = ["CLIENT", "HORES", "VISITES", "COBRAT EN EFECTIU", "QUI HI HA ANAT"]; cabecera(cab);
     lista.forEach((s, i) => {
-      const r = 4 + i;
-      const row = res.addRow([s.c.nombre, s.min / 1440, s.visitas, tarifaTxt(s.tarifa) || "SENSE TARIFA", s.facturar, s.cobrado || null,
-        { formula: `E${r}-IF(F${r}="",0,F${r})`, result: s.pendiente }, s.coste, { formula: `E${r}-H${r}`, result: s.margen }]);
+      const row = res.addRow([s.c.nombre, s.min / 1440, s.visitas, s.cobrado || null, [...s.gente].map((id) => nombreDe(estado.perfiles.find((p) => p.id === id))).join(", ")]);
       if (i % 2) row.eachCell((c) => (c.fill = fill("FFF3F5F8")));
-      if (!Number(s.tarifa?.importe)) row.getCell(4).font = { color: { argb: "FFB3261E" }, bold: true };
     });
-    const n = lista.length, ult = 3 + n;
-    const tr = res.addRow(["TOTAL", { formula: `SUM(B4:B${ult})` }, { formula: `SUM(C4:C${ult})` }, "", { formula: `SUM(E4:E${ult})` }, { formula: `SUM(F4:F${ult})` }, { formula: `SUM(G4:G${ult})` }, { formula: `SUM(H4:H${ult})` }, { formula: `SUM(I4:I${ult})` }]);
+    const ult = 3 + lista.length;
+    const tr = res.addRow(["TOTAL", { formula: `SUM(B4:B${ult})` }, { formula: `SUM(C4:C${ult})` }, { formula: `SUM(D4:D${ult})` }, ""]);
     tr.font = { bold: true }; tr.eachCell((c) => { c.fill = fill("FFE3E7ED"); c.border = { top: { style: "medium" } }; });
-    res.getColumn(2).numFmt = "[h]:mm"; [5, 6, 7, 8, 9].forEach((c) => (res.getColumn(c).numFmt = EUR));
-    res.getColumn(3).alignment = { horizontal: "center" };
-    res.getColumn(4).alignment = { horizontal: "right" };
-    cab.eachCell((c) => (c.alignment = { vertical: "middle", horizontal: "center", wrapText: true }));
+    res.getColumn(2).numFmt = "[h]:mm"; res.getColumn(3).alignment = { horizontal: "center" }; res.getColumn(4).numFmt = EUR;
 
-    // Hoja 2: detalle de visitas, agrupado por cliente con subtotal
     const det = wb.addWorksheet("Detall", { pageSetup: ps, views: [{ state: "frozen", ySplit: 1 }] });
-    det.columns = [{ width: 26 }, { width: 11 }, { width: 22 }, { width: 8 }, { width: 12 }, { width: 11 }, { width: 11 }];
-    const cab2 = det.getRow(1); cab2.values = ["CLIENT", "DATA", "TREBALLADORA", "HORES", "IMPORT", "COBRAT", "COST"]; cabecera(cab2);
+    det.columns = [{ width: 28 }, { width: 12 }, { width: 24 }, { width: 9 }, { width: 16 }];
+    const cab2 = det.getRow(1); cab2.values = ["CLIENT", "DATA", "TREBALLADORA", "HORES", "COBRAT EN EFECTIU"]; cabecera(cab2);
     lista.forEach((s) => {
       s.lista.sort((a, b) => (a.fecha < b.fecha ? -1 : 1)).forEach((t) => {
-        det.addRow([s.c.nombre, deYmd(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), t.minutos / 1440, importeVisita(t), Number(t.cobrado) || null, costeVisita(t)]);
+        det.addRow([s.c.nombre, deYmd(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), t.minutos / 1440, Number(t.cobrado) || null]);
       });
-      const sub = det.addRow([`TOTAL ${s.c.nombre}`, "", "", s.min / 1440, s.facturar, s.cobrado || null, s.coste]);
+      const sub = det.addRow([`TOTAL ${s.c.nombre}`, "", "", s.min / 1440, s.cobrado || null]);
       sub.font = { bold: true }; sub.eachCell((c) => (c.fill = fill("FFE2EFD9")));
       det.addRow([]);
     });
-    det.getColumn(2).numFmt = "dd/mm/yyyy"; det.getColumn(4).numFmt = "[h]:mm"; [5, 6, 7].forEach((c) => (det.getColumn(c).numFmt = EUR));
+    det.getColumn(2).numFmt = "dd/mm/yyyy"; det.getColumn(4).numFmt = "[h]:mm"; det.getColumn(5).numFmt = EUR;
 
-    guardarLibro(await wb.xlsx.writeBuffer(), `facturacio_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx`);
+    guardarLibro(await wb.xlsx.writeBuffer(), `clients_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx`);
   }
 
   function descargarCSV(nombre, filas) {
