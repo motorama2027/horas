@@ -235,21 +235,28 @@
       sb.from("contratos").select("*"),   // horas de contrato: solo las puede leer el master
     ]);
     if (error) return aviso(errorTxt(error), true);
-    const horas = new Map((cons || []).map((c) => [c.usuario_id, Number(c.horas_semanales) || 0]));
-    data.forEach((p) => (p.horas_semanales = horas.get(p.id) ?? 0));
+    const priv = new Map((cons || []).map((c) => [c.usuario_id, c]));
+    data.forEach((p) => {
+      const c = priv.get(p.id);
+      p.horas_semanales = Number(c?.horas_semanales) || 0;
+      p.precio_hora = Number(c?.precio_hora ?? 8);
+    });
     estado.perfiles = data;
-    if (estado.yo) { const yo = data.find((p) => p.id === estado.yo.id); if (yo) estado.yo.horas_semanales = yo.horas_semanales; }
+    if (estado.yo) { const yo = data.find((p) => p.id === estado.yo.id); if (yo) Object.assign(estado.yo, { horas_semanales: yo.horas_semanales, precio_hora: yo.precio_hora }); }
   }
 
-  // Guarda una ficha: las horas de contrato van a su tabla privada, el resto a «perfiles»
+  // Guarda una ficha: horas de contrato y precio por hora van a su tabla privada (solo master), el resto a «perfiles»
   async function guardarPerfil(id, v) {
-    const { horas_semanales, ...resto } = v;
+    const { horas_semanales, precio_hora, ...resto } = v;
     if (Object.keys(resto).length) {
       const { error } = await sb.from("perfiles").update(resto).eq("id", id);
       if (error) return error;
     }
-    if (horas_semanales !== undefined) {
-      const { error } = await sb.from("contratos").upsert({ usuario_id: id, horas_semanales }, { onConflict: "usuario_id" });
+    if (horas_semanales !== undefined || precio_hora !== undefined) {
+      const fila = { usuario_id: id };
+      if (horas_semanales !== undefined) fila.horas_semanales = horas_semanales;
+      if (precio_hora !== undefined) fila.precio_hora = precio_hora;
+      const { error } = await sb.from("contratos").upsert(fila, { onConflict: "usuario_id" });
       if (error) return error;
     }
     return null;
@@ -535,8 +542,7 @@
     const c = cuentas(total, perfilCal(), cobrado, estado.anticiposSemana || 0);
     if (!estado.yo.es_admin) {
       $("#sem-pie").innerHTML = `
-      <div><span class="etq">Horas hechas</span><span class="val num">${fmtH(c.horas)}</span><span class="sub">esta semana</span></div>
-      <div><span class="etq">Cobrado en casas</span><span class="val num">${eur(c.cobrado)}</span><span class="sub">esta semana</span></div>`;
+      <div><span class="etq">Horas de esta semana</span><span class="val num">${fmtH(c.horas)}</span></div>`;
       return;
     }
     $("#sem-pie").innerHTML = `
@@ -552,9 +558,9 @@
       <div class="rejilla">
         <div><label for="f-nombre">Nombre</label><input id="f-nombre" value="${esc(p.nombre)}" ${ro}></div>
         <div><label for="f-apellidos">Apellidos</label><input id="f-apellidos" value="${esc(p.apellidos)}" ${ro}></div>
-        <div><label for="f-puesto">Puesto</label><input id="f-puesto" value="${esc(p.puesto)}" ${ro}></div>
-        ${admin ? `<div><label for="f-horas">Horas de contrato por semana</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}"></div>` : ""}
-        <div><label for="f-precio">Precio por hora (€)</label><input id="f-precio" type="number" min="0" max="200" step="0.5" value="${Number(p.precio_hora ?? 8)}" ${ro}></div>
+        ${admin ? `<div><label for="f-puesto">Puesto</label><input id="f-puesto" value="${esc(p.puesto)}"></div>
+        <div><label for="f-horas">Horas de contrato por semana</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}"></div>
+        <div><label for="f-precio">Precio por hora (€)</label><input id="f-precio" type="number" min="0" max="200" step="0.5" value="${Number(p.precio_hora ?? 8)}"></div>` : ""}
         ${admin ? `<div class="ancho"><label for="f-notas">Notas internas (solo las ve el master)</label><textarea id="f-notas">${esc(p.notas)}</textarea></div>` : ""}
       </div>`;
   }
