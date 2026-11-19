@@ -446,8 +446,7 @@
     $("#sem-pie").innerHTML = `
       <div><span class="etq">Horas hechas</span><span class="val num">${fmtH(c.horas)}</span><span class="sub">contrato ${fmtH(c.contrato)}</span></div>
       <div><span class="etq">${c.dif >= 0 ? "Horas extra" : "Faltan"}</span><span class="val num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(c.dif >= 0 ? c.extra : c.faltan)}</span><span class="sub">× ${eur(c.precio)} = ${eur(c.importe)}</span></div>
-      <div><span class="etq">Cobrado en casas</span><span class="val num">${eur(c.cobrado)}</span><span class="sub">${c.anticipos ? "+ anticipos " + eur(c.anticipos) : "se descuenta"}</span></div>
-      <div class="pie-dinero"><span class="etq">${c.apagar >= 0 ? "Te quedan por cobrar" : "A devolver"}</span><span class="val num">${eur(Math.abs(c.apagar))}</span></div>`;
+      <div><span class="etq">Cobrado en casas</span><span class="val num">${eur(c.cobrado)}</span><span class="sub">esta semana</span></div>`;
   }
 
   // ================================================================ FICHA PERSONAL
