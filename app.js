@@ -1097,7 +1097,7 @@
     const fino = { style: "thin", color: { argb: "FF444444" } };
     const caja = { top: fino, left: fino, bottom: fino, right: fino };
     const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
-    const FMT_N = '#,##0.##;-#,##0.##;""', FMT_EUR = '#,##0.00 "€"';
+    const FMT_N = '#,##0.00;-#,##0.00;""', FMT_T = '[h]:mm;;""', FMT_EUR = '#,##0.00 "€"';
     const usados = new Set();
 
     personas.forEach((p) => {
@@ -1151,19 +1151,19 @@
           set(r, cBase + 3, "TOTALS", { bold: true, fill: col.fuerte, al: "center" });
           for (let i = 0; i < nf; i++) {
             const t = ls[i], rr = r + 1 + i;
-            const h = t ? Math.round((Number(t.minutos) / 60) * 100) / 100 : null;
+            const h = t ? Number(t.minutos) / 1440 : null; // tiempo de Excel (fracción de día) → se ve como 5:45
             ws.mergeCells(rr, cBase, rr, cBase + 1);
             set(rr, cBase, t ? nombreCliente(t).toUpperCase() : "", { al: "center" });
             const ch = ws.getCell(rr, cBase + 2).address;
-            set(rr, cBase + 2, h, { fmt: FMT_N });
-            set(rr, cBase + 3, { formula: `IF(${ch}="","",${ch}*${precioRef})`, result: t ? Math.round(h * (Number(p.precio_hora) || 0) * 100) / 100 : "" }, { fmt: FMT_N });
+            set(rr, cBase + 2, h, { fmt: FMT_T });
+            set(rr, cBase + 3, { formula: `IF(${ch}="","",ROUND(${ch}*24*${precioRef},2))`, result: t ? Math.round((Number(t.minutos) / 60) * (Number(p.precio_hora) || 0) * 100) / 100 : "" }, { fmt: FMT_N });
           }
           const rt = r + 1 + nf;
           const hIni = ws.getCell(r + 1, cBase + 2).address, hFin = ws.getCell(rt - 1, cBase + 2).address;
           const eIni = ws.getCell(r + 1, cBase + 3).address, eFin = ws.getCell(rt - 1, cBase + 3).address;
           const sumH = ls.reduce((a, t) => a + Number(t.minutos), 0) / 60;
-          set(rt, cBase + 2, { formula: `SUM(${hIni}:${hFin})`, result: Math.round(sumH * 100) / 100 }, { caja: true, bold: true, fmt: "#,##0.##" });
-          set(rt, cBase + 3, { formula: `SUM(${eIni}:${eFin})`, result: Math.round(sumH * (Number(p.precio_hora) || 0) * 100) / 100 }, { caja: true, bold: true, fmt: "#,##0.##" });
+          set(rt, cBase + 2, { formula: `SUM(${hIni}:${hFin})`, result: sumH / 24 }, { caja: true, bold: true, fmt: "[h]:mm" });
+          set(rt, cBase + 3, { formula: `SUM(${eIni}:${eFin})`, result: Math.round(sumH * (Number(p.precio_hora) || 0) * 100) / 100 }, { caja: true, bold: true, fmt: FMT_EUR });
           totalesHoras.push(ws.getCell(rt, cBase + 2).address); totalesEur.push(ws.getCell(rt, cBase + 3).address);
           return rt + 2;
         };
@@ -1178,7 +1178,7 @@
         const rHores = rr, rTotal = rr + 1;
         ws.mergeCells(rHores, 7, rHores, 8); set(rHores, 7, "HORES:", { bold: true, caja: true, al: "center" });
         ws.mergeCells(rHores, 9, rHores, 10);
-        set(rHores, 9, { formula: totalesHoras.join("+"), result: Math.round(c.horas * 100) / 100 }, { bold: true, fill: col.suave, fmt: "#,##0.##", al: "center" });
+        set(rHores, 9, { formula: totalesHoras.join("+"), result: c.horas / 24 }, { bold: true, fill: col.suave, fmt: "[h]:mm", al: "center" });
         ws.mergeCells(rTotal, 7, rTotal, 8); set(rTotal, 7, "TOTAL:", { bold: true, caja: true, al: "center" });
         ws.mergeCells(rTotal, 9, rTotal, 10);
         set(rTotal, 9, { formula: totalesEur.join("+"), result: c.bruto }, { bold: true, fill: col.fuerte, fmt: FMT_EUR, al: "center" });
@@ -1186,8 +1186,8 @@
         const restas = [];
         if (c.contrato) {
           ws.mergeCells(r, 7, r, 9);
-          set(r, 7, `CONTRACTE (${num2(Math.min(c.horas, c.contrato))} h × ${num2(c.precio)} €)`, { al: "right" });
-          set(r, 10, { formula: `MIN(${ws.getCell(rHores, 9).address},${c.contrato})*${precioRef}`, result: Math.round(Math.min(c.horas, c.contrato) * c.precio * 100) / 100 }, { fmt: FMT_EUR });
+          set(r, 7, `CONTRACTE (${fmtH(Math.min(c.horas, c.contrato))} h × ${num2(c.precio)} €)`, { al: "right" });
+          set(r, 10, { formula: `ROUND(MIN(${ws.getCell(rHores, 9).address}*24,${c.contrato})*${precioRef},2)`, result: Math.round(Math.min(c.horas, c.contrato) * c.precio * 100) / 100 }, { fmt: FMT_EUR });
           restas.push(ws.getCell(r, 10).address); r++;
         }
         const cobros = sp.ls.filter((t) => Number(t.cobrado));
