@@ -859,7 +859,8 @@
           <div><label for="c-activo">Estado</label><select id="c-activo"><option value="1" ${c.activo ? "selected" : ""}>Activo (sale en la lista)</option><option value="0" ${!c.activo ? "selected" : ""}>Inactivo</option></select></div>
           <div class="ancho"><label for="c-notas">Notas (llaves, horario, lo que haya que saber…)</label><textarea id="c-notas">${esc(c.notas)}</textarea></div>
         </div>
-        ${s ? `<h3 style="margin-top:18px">${MESES[mes.getMonth()][0].toUpperCase() + MESES[mes.getMonth()].slice(1)}: ${s.visitas} visitas · ${fmtMin(s.min)} h ${s.cobrado ? ` · cobrado en efectivo ${eur(s.cobrado)}` : ""}</h3>
+        ${s ? `<div class="barra" style="margin-top:18px"><h3>${MESES[mes.getMonth()][0].toUpperCase() + MESES[mes.getMonth()].slice(1)} ${mes.getFullYear()}: ${s.visitas} ${s.visitas === 1 ? "visita" : "visitas"} · ${fmtMin(s.min)} h ${s.cobrado ? ` · cobrado en efectivo ${eur(s.cobrado)}` : ""}</h3>
+          <span class="espacio"></span>${s.visitas ? `<button type="button" class="btn btn-sm btn-primario" id="c-xls">Descargar Excel de este cliente</button>` : ""}</div>
           ${s.visitas ? `<div class="tabla-envoltura" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th>Quién</th><th class="num">Tiempo</th><th class="num">Cobrado en efectivo</th></tr></thead><tbody>
           ${s.lista.map((t) => `<tr><td>${diaCorto(deYmd(t.fecha))}</td><td>${esc(nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)))}</td><td class="num">${fmtMin(t.minutos)}</td><td class="num">${Number(t.cobrado) ? eur(t.cobrado) : "—"}</td></tr>`).join("")}
           </tbody></table></div>` : `<p class="muted">Sin visitas este mes.</p>`}` : ""}
@@ -870,6 +871,9 @@
           <button type="submit" class="btn btn-primario">Guardar</button>
         </div>
       </form>`);
+    if (s?.visitas) $("#c-xls").onclick = async () => {
+      try { mostrarPrevia(await excelUnCliente(id), () => editarCliente(id), "‹ Volver a la ficha del cliente"); } catch (err) { $("#c-error").textContent = "No se pudo generar el Excel: " + (err.message || err); }
+    };
     if (id) $("#c-borrar").onclick = async () => {
       if ($("#c-borrar").dataset.ok !== "1") {
         $("#c-borrar").dataset.ok = "1";
@@ -1370,6 +1374,60 @@
     return wb;
   }
 
+  // Informe mensual de UN cliente: cada visita con día, trabajadora, horas y cobrado
+  async function excelUnCliente(id) {
+    await cargarExcelJS();
+    const mes = estado.cliMes;
+    const s = statsClientes().find((x) => String(x.c.id) === String(id));
+    if (!s || !s.visitas) throw new Error("Este cliente no tiene visitas este mes.");
+    const c = s.c;
+    const wb = new ExcelJS.Workbook();
+    const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+    const fino = { style: "thin", color: { argb: "FF999999" } };
+    const ws = wb.addWorksheet(c.nombre.replace(/[\\/?*[\]:]/g, " ").slice(0, 30) || "Client", {
+      pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
+        margins: { left: 0.5, right: 0.5, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } },
+      views: [{ showGridLines: false }],
+    });
+    ws.columns = [{ width: 12 }, { width: 12 }, { width: 26 }, { width: 10 }, { width: 16 }];
+    ws.mergeCells("A1:E1");
+    ws.getCell("A1").value = `INFORME MENSUAL · ${CA_MESOS[mes.getMonth()]} ${mes.getFullYear()}`;
+    ws.getCell("A1").font = { bold: true, size: 14 };
+    const dato = (r, etq, val) => {
+      ws.getCell(r, 1).value = etq; ws.getCell(r, 1).font = { bold: true };
+      ws.mergeCells(r, 2, r, 5); ws.getCell(r, 2).value = val;
+    };
+    dato(3, "CLIENT:", c.nombre.toUpperCase());
+    ws.getCell(3, 2).fill = fill("FFF4B6A0"); ws.getCell(3, 2).font = { bold: true };
+    dato(4, "ADREÇA:", c.direccion || "");
+    dato(5, "TELÈFON:", c.telefono || "");
+    const cab = ws.getRow(7);
+    cab.values = ["DIA", "DATA", "TREBALLADORA", "HORES", "COBRAT EN EFECTIU"];
+    cab.font = { bold: true, color: { argb: "FFFFFFFF" } }; cab.height = 22;
+    cab.eachCell((x) => { x.fill = fill("FF1F3A5F"); x.alignment = { vertical: "middle", horizontal: "center" }; x.border = { top: fino, left: fino, bottom: fino, right: fino }; });
+    const lista = s.lista.slice().sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id));
+    lista.forEach((t) => {
+      const d = deYmd(t.fecha);
+      const row = ws.addRow([CA_DIES[(d.getDay() + 6) % 7], d, nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), Number(t.minutos) / 1440, Number(t.cobrado) || null]);
+      const col = colorSemana(lunesDe(d)).suave;   // semanas alternando salmón / verde
+      row.eachCell({ includeEmpty: true }, (x) => { x.fill = fill(col); x.border = { top: fino, left: fino, bottom: fino, right: fino }; });
+    });
+    const ini = 8, fin = 7 + lista.length;
+    const tr = ws.addRow(["TOTAL", "", `${s.visitas} ${s.visitas === 1 ? "VISITA" : "VISITES"}`,
+      { formula: `SUM(D${ini}:D${fin})`, result: s.min / 1440 }, { formula: `SUM(E${ini}:E${fin})`, result: s.cobrado }]);
+    tr.font = { bold: true, size: 12 }; tr.height = 22;
+    tr.eachCell({ includeEmpty: true }, (x) => { x.fill = fill("FFE3E7ED"); x.border = { top: { style: "medium" }, bottom: { style: "medium" }, left: fino, right: fino }; });
+    ws.getColumn(2).numFmt = "dd/mm/yyyy"; ws.getColumn(4).numFmt = '[h]:mm;;""'; ws.getColumn(5).numFmt = '#,##0.00 "€";;""';
+    [1, 2, 4].forEach((k) => (ws.getColumn(k).alignment = { horizontal: "center" }));
+    [3, 4, 5, 7].forEach((r) => ws.getRow(r).eachCell((x) => { if (x.col !== 1) x.alignment = { horizontal: "left" }; }));
+    cab.eachCell((x) => (x.alignment = { vertical: "middle", horizontal: "center" }));
+    const rp = fin + 3;
+    ws.getCell(rp, 1).value = "PREPARAT:"; ws.getCell(rp, 1).font = { bold: true };
+    ws.getCell(rp, 2).value = fechaPunto(new Date());
+    const nom = c.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    return { wb, nombre: `client_${nom}_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx` };
+  }
+
   // Excel mensual por cliente: horas, visitas y lo cobrado en efectivo (sección Clientes)
   async function excelClientesMes() {
     await cargarExcelJS();
@@ -1479,7 +1537,7 @@
       <div class="previa-num">Página ${i + 1} de ${paginas.length}</div></div>`).join("");
   }
 
-  function mostrarPrevia(libro, volver) {
+  function mostrarPrevia(libro, volver, textoVolver = "‹ Cambiar semanas o persona") {
     const hojas = libro.wb.worksheets;
     abrirModal("Vista previa", `
       <div class="previa-cab">
@@ -1488,7 +1546,7 @@
       </div>
       <div class="previa" id="previa"></div>
       <div class="acciones">
-        ${volver ? `<button type="button" class="btn izq" id="pv-volver">‹ Cambiar semanas o persona</button>` : ""}
+        ${volver ? `<button type="button" class="btn izq" id="pv-volver">${esc(textoVolver)}</button>` : ""}
         <button type="button" class="btn" data-cerrar>Cerrar</button>
         <button type="button" class="btn btn-primario" id="pv-bajar">Descargar Excel</button>
       </div>`);
