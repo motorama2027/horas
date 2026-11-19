@@ -120,13 +120,14 @@
     return m;
   }
   function abrirModal(titulo, html) {
+    $("#modal .modal-caja").classList.remove("modal-ancha");
     $("#modal-titulo").textContent = titulo;
     $("#modal-cuerpo").innerHTML = html;
     $("#modal").hidden = false;
     const f = $("#modal-cuerpo input:not([readonly]), #modal-cuerpo select");
     if (f) setTimeout(() => f.focus(), 30);
   }
-  function cerrarModal() { $("#modal").hidden = true; $("#modal-cuerpo").innerHTML = ""; }
+  function cerrarModal() { $("#modal").hidden = true; $("#modal-cuerpo").innerHTML = ""; $("#modal .modal-caja").classList.remove("modal-ancha"); }
   document.addEventListener("click", (e) => { if (e.target.closest("[data-cerrar]")) cerrarModal(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#modal").hidden) cerrarModal(); });
 
@@ -730,7 +731,7 @@
     $("#cli-orden").onchange = () => pintarTablaClientes();
     $("#cli-xls").onclick = async (e) => {
       e.target.disabled = true;
-      try { await excelClientesMes(); } catch (err) { aviso("No se pudo generar el Excel: " + (err.message || err), true); }
+      try { mostrarPrevia(await excelClientesMes()); } catch (err) { aviso("No se pudo generar el Excel: " + (err.message || err), true); }
       e.target.disabled = false;
     };
     pintarClientes();
@@ -946,7 +947,7 @@
     $("#inf-hoy").onclick = () => { estado.infLunes = lunesDe(new Date()); pintarInforme(); };
     $("#inf-ant").onclick = () => { estado.infLunes = sumarDias(lunesDe(new Date()), -7); pintarInforme(); };
     $("#inf-print").onclick = () => { document.body.classList.remove("imprimir-ficha"); window.print(); };
-    $("#inf-csv").onclick = () => dialogoExcel("");
+    $("#inf-csv").onclick = () => { estado.xlsSel = null; dialogoExcel(""); };
     pintarInforme();
   }
 
@@ -1075,7 +1076,7 @@
     }).join("");
 
     // Eventos de la ficha
-    document.querySelectorAll("[data-csv]").forEach((b) => (b.onclick = () => dialogoExcel(b.dataset.csv)));
+    document.querySelectorAll("[data-csv]").forEach((b) => (b.onclick = () => { estado.xlsSel = null; dialogoExcel(b.dataset.csv); }));
     document.querySelectorAll("[data-imprimir]").forEach((b) => (b.onclick = () => {
       document.querySelectorAll(".detalle-persona").forEach((el) => el.classList.toggle("seleccionada", el.dataset.persona === b.dataset.imprimir));
       document.body.classList.add("imprimir-ficha");
@@ -1163,29 +1164,31 @@
       <form id="form-xls">
         <label for="x-persona">Persona</label>
         <select id="x-persona"><option value="">Todas (una hoja por persona)</option>
-          ${trabajadoras.map((p) => `<option value="${p.id}" ${p.id === personaId ? "selected" : ""}>${esc(nombreDe(p))}</option>`).join("")}</select>
+          ${trabajadoras.map((p) => `<option value="${p.id}" ${p.id === (estado.xlsSel ? estado.xlsSel.persona : personaId) ? "selected" : ""}>${esc(nombreDe(p))}</option>`).join("")}</select>
         <div class="rejilla">
-          <div><label for="x-desde">Desde la semana</label><select id="x-desde">${opc(estado.infLunes)}</select></div>
-          <div><label for="x-hasta">Hasta la semana</label><select id="x-hasta">${opc(estado.infLunes)}</select></div>
+          <div><label for="x-desde">Desde la semana</label><select id="x-desde">${opc(estado.xlsSel?.desde || estado.infLunes)}</select></div>
+          <div><label for="x-hasta">Hasta la semana</label><select id="x-hasta">${opc(estado.xlsSel?.hasta || estado.infLunes)}</select></div>
         </div>
         <p class="muted" style="font-size:.85rem">Una página A4 vertical por semana, lista para imprimir. Las semanas van alternando
           <span class="chip" style="background:#FCE4D6;color:#8a3b22">salmón</span> y <span class="chip" style="background:#E2EFD9;color:#2d6a25">verde</span>.</p>
         <p class="error" id="x-error"></p>
         <div class="acciones"><button type="button" class="btn" data-cerrar>Cancelar</button>
-          <button type="submit" class="btn btn-primario" id="x-btn">Descargar Excel</button></div>
+          <button type="submit" class="btn btn-primario" id="x-btn">Ver y descargar</button></div>
       </form>`);
     $("#form-xls").onsubmit = async (e) => {
       e.preventDefault();
       let desde = deYmd($("#x-desde").value), hasta = deYmd($("#x-hasta").value);
       if (desde > hasta) [desde, hasta] = [hasta, desde];
       $("#x-btn").disabled = true; $("#x-btn").textContent = "Preparando…";
+      const sel = { persona: $("#x-persona").value, desde, hasta };
       try {
-        await generarExcel($("#x-persona").value, desde, hasta);
-        cerrarModal();
+        const libro = await generarExcel(sel.persona, desde, hasta);
+        estado.xlsSel = sel;
+        mostrarPrevia(libro, () => dialogoExcel(personaId));
       } catch (err) {
         console.error(err);
         $("#x-error").textContent = "No se pudo generar el Excel: " + (err.message || err);
-        $("#x-btn").disabled = false; $("#x-btn").textContent = "Descargar Excel";
+        $("#x-btn").disabled = false; $("#x-btn").textContent = "Ver y descargar";
       }
     };
   }
@@ -1221,9 +1224,8 @@
     const semanas = [];
     for (let l = new Date(desde); l <= hasta; l = sumarDias(l, 7)) semanas.push(new Date(l));
     const wb = construirLibro(window.ExcelJS, personas, semanas, D);
-    const buf = await wb.xlsx.writeBuffer();
     const quien = personaId ? (personas[0]?.usuario || "persona") : "totes";
-    guardarLibro(buf, `fulls_${quien}_${ymd(desde)}${semanas.length > 1 ? "_a_" + ymd(hasta) : ""}.xlsx`);
+    return { wb, nombre: `fulls_${quien}_${ymd(desde)}${semanas.length > 1 ? "_a_" + ymd(hasta) : ""}.xlsx` };
   }
 
   // Construye el libro: una hoja por persona, una página vertical por semana
@@ -1389,7 +1391,8 @@
       if (i % 2) row.eachCell((c) => (c.fill = fill("FFF3F5F8")));
     });
     const ult = 3 + lista.length;
-    const tr = res.addRow(["TOTAL", { formula: `SUM(B4:B${ult})` }, { formula: `SUM(C4:C${ult})` }, { formula: `SUM(D4:D${ult})` }, ""]);
+    const tMin = lista.reduce((x, s) => x + s.min, 0), tVis = lista.reduce((x, s) => x + s.visitas, 0), tCob = r2(lista.reduce((x, s) => x + s.cobrado, 0));
+    const tr = res.addRow(["TOTAL", { formula: `SUM(B4:B${ult})`, result: tMin / 1440 }, { formula: `SUM(C4:C${ult})`, result: tVis }, { formula: `SUM(D4:D${ult})`, result: tCob }, ""]);
     tr.font = { bold: true }; tr.eachCell((c) => { c.fill = fill("FFE3E7ED"); c.border = { top: { style: "medium" } }; });
     res.getColumn(2).numFmt = "[h]:mm"; res.getColumn(3).alignment = { horizontal: "center" }; res.getColumn(4).numFmt = EUR;
 
@@ -1406,7 +1409,103 @@
     });
     det.getColumn(2).numFmt = "dd/mm/yyyy"; det.getColumn(4).numFmt = "[h]:mm"; det.getColumn(5).numFmt = EUR;
 
-    guardarLibro(await wb.xlsx.writeBuffer(), `clients_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx`);
+    return { wb, nombre: `clients_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx` };
+  }
+
+  // ================================================================ VISTA PREVIA DEL EXCEL
+  function valorCelda(cell) {
+    let v = cell.value;
+    if (v && typeof v === "object" && !(v instanceof Date)) v = "result" in v ? v.result : v.richText ? v.richText.map((r) => r.text).join("") : v.text ?? "";
+    if (v === null || v === undefined || v === "") return "";
+    const f = cell.numFmt || "";
+    if (v instanceof Date) return `${dd(v.getDate())}/${dd(v.getMonth() + 1)}/${v.getFullYear()}`;
+    if (typeof v === "number") {
+      if (v === 0 && /;""\s*$|;;""/.test(f)) return "";
+      if (f.includes("[h]:mm")) return fmtH(v * 24);
+      if (f.includes("dd/mm")) { const d = new Date(Math.round((v - 25569) * 86400000)); return `${dd(d.getUTCDate())}/${dd(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`; }
+      const dec = f.includes(".00") ? 2 : 0, max = f.includes(".00") || f.includes(".##") ? 2 : 2;
+      const n = v.toLocaleString("es-ES", { minimumFractionDigits: dec, maximumFractionDigits: max });
+      return f.includes("€") ? n + " €" : n;
+    }
+    return String(v);
+  }
+
+  function renderHoja(ws) {
+    const nCols = Math.max(1, ws.columnCount), nFilas = ws.rowCount;
+    const anchos = Array.from({ length: nCols }, (_, i) => Math.round((ws.getColumn(i + 1).width || 9) * 7.2));
+    const rejilla = ws.views?.[0]?.showGridLines !== false;
+    const merges = new Map(), tapadas = new Set();
+    (ws.model.merges || []).forEach((rng) => {
+      const [a, b] = rng.split(":"); const ca = ws.getCell(a), cb = ws.getCell(b);
+      merges.set(`${ca.row},${ca.col}`, { rs: cb.row - ca.row + 1, cs: cb.col - ca.col + 1 });
+      for (let r = ca.row; r <= cb.row; r++) for (let c = ca.col; c <= cb.col; c++) if (r !== ca.row || c !== ca.col) tapadas.add(`${r},${c}`);
+    });
+    const cortes = new Set((ws.rowBreaks || []).map((b) => b.id));
+    const linea = (b) => (!b || !b.style ? "" : `${b.style === "medium" || b.style === "thick" ? 2 : 1}px solid #444`);
+    const colgroup = `<colgroup>${anchos.map((w) => `<col style="width:${w}px">`).join("")}</colgroup>`;
+    let paginas = [], filas = "";
+    for (let r = 1; r <= nFilas; r++) {
+      const row = ws.getRow(r);
+      let tds = "";
+      for (let c = 1; c <= nCols; c++) {
+        const k = `${r},${c}`;
+        if (tapadas.has(k)) continue;
+        const cell = row.getCell(c), m = merges.get(k);
+        const st = [];
+        const fg = cell.fill?.fgColor?.argb; if (fg) st.push(`background:#${fg.slice(-6)}`);
+        const fo = cell.font || {};
+        if (fo.bold) st.push("font-weight:700");
+        if (fo.italic) st.push("font-style:italic");
+        if (fo.size) st.push(`font-size:${Math.round(fo.size * 1.2)}px`);
+        if (fo.color?.argb) st.push(`color:#${fo.color.argb.slice(-6)}`);
+        const al = cell.alignment || {};
+        if (al.horizontal) st.push(`text-align:${al.horizontal === "centerContinuous" ? "center" : al.horizontal}`);
+        if (al.vertical === "top") st.push("vertical-align:top");
+        if (al.wrapText) st.push("white-space:normal");
+        const bd = cell.border || {};
+        ["top", "right", "bottom", "left"].forEach((lado) => { const l = linea(bd[lado]); if (l) st.push(`border-${lado}:${l}`); });
+        const v = valorCelda(cell);
+        if (typeof (cell.value?.result ?? cell.value) === "number" && !al.horizontal) st.push("text-align:right");
+        tds += `<td${m ? ` rowspan="${m.rs}" colspan="${m.cs}"` : ""} style="${st.join(";")}">${esc(v)}</td>`;
+      }
+      const alto = row.height ? `height:${Math.round(row.height * 1.33)}px` : "";
+      filas += `<tr style="${alto}">${tds}</tr>`;
+      if (cortes.has(r)) { paginas.push(filas); filas = ""; }
+    }
+    if (filas) paginas.push(filas);
+    const vertical = ws.pageSetup?.orientation !== "landscape";
+    return paginas.map((f, i) => `<div class="previa-pagina ${vertical ? "vertical" : "horizontal"}">
+      <table class="previa-tabla ${rejilla ? "con-rejilla" : ""}">${colgroup}<tbody>${f}</tbody></table>
+      <div class="previa-num">Página ${i + 1} de ${paginas.length}</div></div>`).join("");
+  }
+
+  function mostrarPrevia(libro, volver) {
+    const hojas = libro.wb.worksheets;
+    abrirModal("Vista previa", `
+      <div class="previa-cab">
+        <div class="previa-tabs" role="tablist">${hojas.map((ws, i) => `<button type="button" class="btn btn-sm ${i ? "" : "btn-primario"}" data-hoja="${i}" role="tab">${esc(ws.name)}</button>`).join("")}</div>
+        <span class="muted" style="font-size:.85rem">${esc(libro.nombre)}</span>
+      </div>
+      <div class="previa" id="previa"></div>
+      <div class="acciones">
+        ${volver ? `<button type="button" class="btn izq" id="pv-volver">‹ Cambiar semanas o persona</button>` : ""}
+        <button type="button" class="btn" data-cerrar>Cerrar</button>
+        <button type="button" class="btn btn-primario" id="pv-bajar">Descargar Excel</button>
+      </div>`);
+    $("#modal .modal-caja").classList.add("modal-ancha");
+    const ver = (i) => {
+      $("#previa").innerHTML = renderHoja(hojas[i]);
+      document.querySelectorAll("[data-hoja]").forEach((b) => b.classList.toggle("btn-primario", Number(b.dataset.hoja) === i));
+      $("#previa").scrollTop = 0;
+    };
+    document.querySelectorAll("[data-hoja]").forEach((b) => (b.onclick = () => ver(Number(b.dataset.hoja))));
+    ver(0);
+    if (volver) $("#pv-volver").onclick = volver;
+    $("#pv-bajar").onclick = async () => {
+      $("#pv-bajar").disabled = true;
+      guardarLibro(await libro.wb.xlsx.writeBuffer(), libro.nombre);
+      cerrarModal();
+    };
   }
 
   function descargarCSV(nombre, filas) {

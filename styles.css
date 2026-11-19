@@ -266,6 +266,16 @@ tr.fila-click:hover td { background: #f8fafd; }
 .total-dia { margin-top: 16px; padding: 12px 14px; background: var(--acento-suave); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
 .total-dia .val { font: 700 1.3rem var(--f-num); color: var(--acento); }
 
+.modal-caja.modal-ancha { max-width: 920px; }
+.previa-cab { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 10px; }
+.previa-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.previa { background: #e6e9ee; border-radius: 8px; padding: 18px; max-height: 62vh; overflow: auto; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.previa-pagina { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.18); padding: 26px 22px 14px; color: #111; font-family: Calibri, "Segoe UI", Arial, sans-serif; }
+.previa-tabla { border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.previa-tabla td { padding: 2px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 19px; border: 0; }
+.previa-tabla.con-rejilla td { border: 1px solid #edf0f3; }
+.previa-num { text-align: center; font-size: 11px; color: #999; margin-top: 10px; }
+
 .aviso {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
   background: var(--tinta); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: .9rem; box-shadow: var(--sombra);
