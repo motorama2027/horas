@@ -109,6 +109,8 @@
   function errorTxt(e) {
     const m = (e && (e.message || e.error_description)) || String(e);
     if (/Invalid login credentials/i.test(m)) return "Usuario o contraseña incorrectos.";
+    if (/Email not confirmed/i.test(m)) return "Supabase pide confirmar el email: desactiva «Confirm email» en Authentication → Sign In / Providers → Email, borra el usuario en Authentication → Users y créalo de nuevo.";
+    if (/Database error saving new user/i.test(m)) return "Supabase no pudo crear la ficha del usuario. Vuelve a ejecutar schema.sql completo en el SQL Editor.";
     if (/already registered|already exists|duplicate key.*usuario/i.test(m)) return "Ese nombre de usuario ya existe.";
     if (/Password should be at least/i.test(m)) return "La contraseña debe tener al menos 6 caracteres.";
     if (/row-level security/i.test(m)) return "No tienes permiso para hacer esto. ¿Tu usuario está activo?";
@@ -136,8 +138,12 @@
     $("#vista-app").hidden = true;
     $("#vista-login").hidden = false;
     $("#login-empresa").textContent = C.EMPRESA || "Control de horas";
-    const { data: hay } = await sb.rpc("hay_usuarios");
+    const { data: hay, error: eHay } = await sb.rpc("hay_usuarios");
     modoAlta = hay === false;
+    if (eHay) {
+      console.error("hay_usuarios", eHay);
+      $("#login-error").textContent = `No se puede conectar con la base de datos: ${eHay.message}. Revisa config.js y que schema.sql se ejecutó.`;
+    }
     $("#login-titulo").textContent = modoAlta ? "Crear cuenta master" : "Entrar";
     $("#login-sub").textContent = modoAlta
       ? "Aún no hay ningún usuario. Esta primera cuenta será la del administrador (master), que verá las horas de todos."
@@ -166,7 +172,7 @@
         const { data: s } = await sb.auth.getSession();
         if (!s.session) {
           const { error: e2 } = await sb.auth.signInWithPassword({ email: emailDe(usuario), password: pass });
-          if (e2) throw new Error("Cuenta creada, pero Supabase pide confirmar el email. Desactiva «Confirm email» en Supabase (ver README) y vuelve a entrar.");
+          if (e2) throw e2;
         }
       } else {
         const { error } = await sb.auth.signInWithPassword({ email: emailDe(usuario), password: pass });
@@ -174,6 +180,7 @@
       }
       await arrancar();
     } catch (err) {
+      console.error("Login", err);
       $("#login-error").textContent = errorTxt(err);
     } finally {
       btn.disabled = false;
@@ -191,8 +198,16 @@
     const { data: { session } } = await sb.auth.getSession();
     if (!session) return mostrarLogin();
 
-    const { data: yo, error } = await sb.from("perfiles").select("*").eq("id", session.user.id).single();
-    if (error || !yo) { await sb.auth.signOut(); return mostrarLogin(); }
+    const { data: yo, error } = await sb.from("perfiles").select("*").eq("id", session.user.id).maybeSingle();
+    if (error || !yo) {
+      console.error("Error al leer el perfil", error);
+      await sb.auth.signOut();
+      await mostrarLogin();
+      $("#login-error").textContent = error
+        ? `La sesión se abrió pero no se pudo leer tu ficha: ${error.message}${error.code ? " (" + error.code + ")" : ""}`
+        : "La sesión se abrió pero tu ficha no existe en la tabla «perfiles». Vuelve a ejecutar schema.sql en Supabase.";
+      return;
+    }
     if (!yo.activo) {
       await sb.auth.signOut();
       await mostrarLogin();
