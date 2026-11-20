@@ -327,6 +327,7 @@
       </div>
       <div class="sem-pie" id="sem-pie"></div>
       <div class="semana-dias" id="semana"></div>
+      <div class="total-semana"><span>Total semana:</span><span class="num" id="total-semana"></span></div>
       <p class="muted ayuda">Elige el cliente, pon el tiempo y, si te han pagado algo en esa casa, apúntalo en «Cobrado». Se guarda solo.
         ${yo.es_admin ? "" : "Si un cliente no está en la lista, pide a tu responsable que lo añada."}</p>`;
 
@@ -393,10 +394,10 @@
       return `<section class="${clases}" data-fecha="${k}">
         <div class="dia-cab">
           <h3>${nombre} <span class="muted">${d.getDate()} ${MESES[d.getMonth()]}</span>${k === hoy ? ' <span class="chip chip-festivo">Hoy</span>' : ""}</h3>
-          <span class="dia-total num"></span>
         </div>
         <div class="lineas">${lista.map(lineaHTML).join("")}${lista.length ? "" : lineaHTML(null)}</div>
         <button type="button" class="btn btn-sm l-anadir">+ Añadir cliente</button>
+        <div class="dia-pie"><span>Total:</span><span class="dia-total num"></span></div>
       </section>`;
     }).join("");
 
@@ -539,12 +540,9 @@
       const m = porDia.get(c.dataset.fecha) || 0;
       c.querySelector(".dia-total").innerHTML = m ? fmtMin(m) + " h" : '<span class="cero">0:00 h</span>';
     });
+    $("#total-semana").textContent = fmtMin(total) + " h";
     const c = cuentas(total, perfilCal(), cobrado, estado.anticiposSemana || 0);
-    if (!estado.yo.es_admin) {
-      $("#sem-pie").innerHTML = `
-      <div><span class="etq">Horas de esta semana</span><span class="val num">${fmtH(c.horas)}</span></div>`;
-      return;
-    }
+    if (!estado.yo.es_admin) { $("#sem-pie").hidden = true; return; }
     $("#sem-pie").innerHTML = `
       <div><span class="etq">Horas hechas</span><span class="val num">${fmtH(c.horas)}</span><span class="sub">contrato ${fmtH(c.contrato)}</span></div>
       <div><span class="etq">${c.dif >= 0 ? "Horas extra" : "Faltan"}</span><span class="val num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(c.dif >= 0 ? c.extra : c.faltan)}</span><span class="sub">× ${eur(c.precio)} = ${eur(c.importe)}</span></div>

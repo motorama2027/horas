@@ -150,6 +150,11 @@ textarea { min-height: 70px; resize: vertical; }
 .dia-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .dia-cab h3 .muted { font-weight: 500; }
 .dia-total { font-size: 1.15rem; font-weight: 700; color: var(--acento); }
+.dia-pie { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  background: var(--acento-suave); border-radius: 8px; padding: 8px 12px; font-weight: 700; color: var(--acento); }
+.total-semana { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  background: var(--acento); color: #fff; border-radius: var(--radio); padding: 16px 20px; font-size: 1.15rem; font-weight: 700; }
+.total-semana .num { font-size: 1.7rem; }
 .lineas { display: flex; flex-direction: column; gap: 8px; }
 .linea { display: grid; grid-template-columns: auto auto 1fr auto; grid-template-areas: "cli cli cli x" "otro otro otro otro" "tiempo cobro . ." "estado estado estado estado"; gap: 6px 14px; align-items: center; padding-bottom: 8px; border-bottom: 1px dashed var(--linea); }
 .linea:last-child { border-bottom: 0; padding-bottom: 0; }
