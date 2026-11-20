@@ -700,6 +700,15 @@
             <option value="0" ${!p.es_admin ? "selected" : ""}>Trabajador (solo ve lo suyo)</option>
             <option value="1" ${p.es_admin ? "selected" : ""}>Master (ve a todos)</option></select></div>
         </div>`}
+        <div class="caja-pass">
+          <label for="u-pass">Cambiar contraseña de ${esc(p.nombre || p.usuario)}</label>
+          <div class="fila-pass">
+            <input id="u-pass" type="text" minlength="6" autocomplete="off" placeholder="Nueva contraseña">
+            <button type="button" class="btn" id="u-pass-btn">Cambiar contraseña</button>
+          </div>
+          <p class="muted" style="font-size:.82rem;margin:6px 0 0">Entrará con usuario <b>${esc(p.usuario)}</b> y esta contraseña nueva. La antigua deja de funcionar.</p>
+          <p class="error" id="u-pass-msg"></p>
+        </div>
         <p class="error" id="u-error"></p>
         <div class="acciones">
           <button type="button" class="btn izq" id="u-cal">Ver su calendario</button>
@@ -708,6 +717,21 @@
         </div>
       </form>`);
     $("#u-cal").onclick = () => { estado.calUsuario = p.id; cerrarModal(); location.hash = "calendario"; if (estado.vista === "calendario") irA("calendario"); };
+    $("#u-pass-btn").onclick = async () => {
+      const nueva = $("#u-pass").value.trim(), msg = $("#u-pass-msg");
+      msg.className = "error";
+      if (nueva.length < 6) return (msg.textContent = "La contraseña debe tener al menos 6 caracteres.");
+      $("#u-pass-btn").disabled = true;
+      const { error } = await sb.rpc("cambiar_contrasena", { usuario: p.id, nueva });
+      $("#u-pass-btn").disabled = false;
+      if (error) {
+        msg.textContent = /function .*cambiar_contrasena|Could not find the function/i.test(error.message)
+          ? "Falta activar esta opción en Supabase (actualizacion_6.sql)." : errorTxt(error);
+        return;
+      }
+      $("#u-pass").value = "";
+      msg.className = "dif-pos"; msg.textContent = "✓ Contraseña cambiada. Pásale la nueva a " + (p.nombre || p.usuario) + ".";
+    };
     $("#form-edit").onsubmit = async (e) => {
       e.preventDefault();
       const v = leerFicha(true);

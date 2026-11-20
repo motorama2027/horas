@@ -281,6 +281,11 @@ tr.fila-click:hover td { background: #f8fafd; }
 .previa-tabla.con-rejilla td { border: 1px solid #edf0f3; }
 .previa-num { text-align: center; font-size: 11px; color: #999; margin-top: 10px; }
 
+.caja-pass { margin-top: 16px; background: var(--fondo); border-radius: 8px; padding: 10px 14px 12px; }
+.caja-pass label { margin-top: 2px; }
+.fila-pass { display: flex; gap: 8px; flex-wrap: wrap; }
+.fila-pass input { flex: 1; min-width: 200px; font-family: var(--f-num); }
+
 .aviso {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
   background: var(--tinta); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: .9rem; box-shadow: var(--sombra);
