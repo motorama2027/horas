@@ -939,8 +939,9 @@
         </div>
         ${s ? `<div class="barra" style="margin-top:18px"><h3>${MESES[mes.getMonth()][0].toUpperCase() + MESES[mes.getMonth()].slice(1)} ${mes.getFullYear()}: ${s.visitas} ${s.visitas === 1 ? "visita" : "visitas"} · ${fmtMin(s.min)} h ${s.cobrado ? ` · cobrado en efectivo ${eur(s.cobrado)}` : ""}</h3>
           <span class="espacio"></span>${s.visitas ? `<button type="button" class="btn btn-sm btn-primario" id="c-xls">Descargar Excel de este cliente</button>` : ""}</div>
-          ${s.visitas ? `<div class="tabla-envoltura" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th>Quién</th><th class="num">Tiempo</th><th class="num">Cobrado en efectivo</th></tr></thead><tbody>
-          ${s.lista.map((t) => `<tr><td>${diaCorto(deYmd(t.fecha))}</td><td>${esc(nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)))}</td><td class="num">${fmtMin(t.minutos)}</td><td class="num">${Number(t.cobrado) ? eur(t.cobrado) : "—"}</td></tr>`).join("")}
+          ${s.visitas ? `<div class="tabla-envoltura" style="margin-top:8px"><table><thead><tr><th>Fecha</th><th>Quién</th><th class="num">Tiempo</th><th class="num">Cobrado en efectivo</th><th></th></tr></thead><tbody>
+          ${s.lista.map((t) => `<tr><td>${diaCorto(deYmd(t.fecha))}</td><td>${esc(nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)))}</td><td class="num">${fmtMin(t.minutos)}</td><td class="num">${Number(t.cobrado) ? eur(t.cobrado) : "—"}</td>
+            <td class="dcha"><button type="button" class="btn btn-sm" data-visita="${t.id}" title="Corregir esta visita">✏️ Corregir</button></td></tr>`).join("")}
           </tbody></table></div>` : `<p class="muted">Sin visitas este mes.</p>`}` : ""}
         <p class="error" id="c-error"></p>
         <div class="acciones">
@@ -954,6 +955,10 @@
       try { mostrarPrevia(await excelUnCliente(id), () => editarCliente(id), "‹ Volver a la ficha del cliente"); } catch (err) { $("#c-error").textContent = "No se pudo generar el Excel: " + (err.message || err); }
     };
     if (id) $("#c-unificar").onclick = () => unificarClientes([id]);
+    document.querySelectorAll("[data-visita]").forEach((b) => (b.onclick = () => {
+      const t = s.lista.find((x) => String(x.id) === b.dataset.visita);
+      if (t) editarVisita(t, () => editarCliente(id));
+    }));
     if (id) $("#c-borrar").onclick = async () => {
       if ($("#c-borrar").dataset.ok !== "1") {
         $("#c-borrar").dataset.ok = "1";
@@ -974,6 +979,62 @@
       const cid = res.data.id;
       if (id) await sb.from("trabajos").update({ cliente: v.nombre }).eq("cliente_id", id);
       cerrarModal(); aviso(id ? "Cliente guardado" : "Cliente creado"); await cargarListaClientes(); pintarTablaClientes();
+    };
+  }
+
+  // Corregir una visita desde la ficha del cliente: otro cliente, tiempo, cobrado o borrarla
+  function editarVisita(t, volver) {
+    const quien = nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id));
+    const h = Math.floor(Number(t.minutos) / 60), m = Number(t.minutos) % 60;
+    const opcMin = Array.from({ length: 12 }, (_, i) => i * 5).map((v) => `<option value="${v}" ${v === m - (m % 5) ? "selected" : ""}>${String(v).padStart(2, "0")}</option>`).join("");
+    const opcCli = (q) => estado.clientes
+      .filter((c) => String(c.id) === String(t.cliente_id) || ((c.activo) && (!q || normal(c.nombre).includes(q))))
+      .map((c) => `<option value="${c.id}" ${String(c.id) === String(t.cliente_id) ? "selected" : ""}>${esc(c.nombre)}${String(c.id) === String(t.cliente_id) ? "  (actual)" : ""}</option>`).join("");
+    abrirModal("Corregir visita", `
+      <form id="form-vis">
+        <p style="margin:0"><b>${esc(quien)}</b> · ${fechaLarga(deYmd(t.fecha))}</p>
+        <label for="v-buscar">Cliente</label>
+        <input id="v-buscar" type="search" placeholder="🔍 Buscar otro cliente…" autocomplete="off">
+        <select id="v-cli" size="6" style="margin-top:6px">${opcCli("")}</select>
+        <div class="rejilla">
+          <div><label for="v-h">Tiempo</label>
+            <span class="l-tiempo"><input id="v-h" class="l-h" type="number" min="0" max="16" value="${h}"><span class="muted">h</span>
+            <select id="v-m" class="l-m">${opcMin}</select><span class="muted">min</span></span></div>
+          <div><label for="v-eur">Cobrado en efectivo (€)</label><input id="v-eur" type="number" min="0" step="0.5" value="${Number(t.cobrado) || ""}" placeholder="0"></div>
+        </div>
+        <p class="error" id="v-error"></p>
+        <div class="acciones">
+          <button type="button" class="btn btn-peligro izq" id="v-borrar">Borrar visita</button>
+          <button type="button" class="btn" id="v-volver">‹ Volver</button>
+          <button type="submit" class="btn btn-primario" id="v-btn">Guardar</button>
+        </div>
+      </form>`);
+    $("#v-buscar").oninput = () => {
+      const sel = $("#v-cli").value;
+      $("#v-cli").innerHTML = opcCli(normal($("#v-buscar").value));
+      if ([...$("#v-cli").options].some((o) => o.value === sel)) $("#v-cli").value = sel;
+    };
+    $("#v-volver").onclick = volver;
+    const recargar = async () => { await pintarClientes(); volver(); };
+    $("#v-borrar").onclick = async () => {
+      if ($("#v-borrar").dataset.ok !== "1") { $("#v-borrar").dataset.ok = "1"; $("#v-borrar").textContent = "Pulsa otra vez para borrar"; return; }
+      const { error } = await sb.from("trabajos").delete().eq("id", t.id);
+      if (error) return ($("#v-error").textContent = errorTxt(error));
+      aviso("Visita borrada"); recargar();
+    };
+    $("#form-vis").onsubmit = async (e) => {
+      e.preventDefault();
+      const cli = clientePorId($("#v-cli").value);
+      const minutos = (parseInt($("#v-h").value, 10) || 0) * 60 + (parseInt($("#v-m").value, 10) || 0);
+      const cobrado = Math.max(0, Math.round((parseFloat(String($("#v-eur").value).replace(",", ".")) || 0) * 100) / 100);
+      if (!cli) return ($("#v-error").textContent = "Elige el cliente de la lista.");
+      if (!minutos) return ($("#v-error").textContent = "Pon el tiempo.");
+      if (minutos > 960) return ($("#v-error").textContent = "Máximo 16 horas.");
+      $("#v-btn").disabled = true;
+      const { error } = await sb.from("trabajos").update({ cliente_id: cli.id, cliente: cli.nombre, minutos, cobrado }).eq("id", t.id);
+      if (error) { $("#v-btn").disabled = false; return ($("#v-error").textContent = errorTxt(error)); }
+      aviso(String(cli.id) === String(t.cliente_id) ? "Visita corregida" : `Visita pasada a ${cli.nombre}`);
+      recargar();
     };
   }
 
