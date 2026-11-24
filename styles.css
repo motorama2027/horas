@@ -286,6 +286,15 @@ tr.fila-click:hover td { background: #f8fafd; }
 .fila-pass { display: flex; gap: 8px; flex-wrap: wrap; }
 .fila-pass input { flex: 1; min-width: 200px; font-family: var(--f-num); }
 
+.aviso-amano { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--aviso-suave); border: 1px solid #f0c27a; border-left: 5px solid #e8890c; border-radius: var(--radio); padding: 12px 16px; color: #6b3f00; }
+.btn-naranja { background: #e8890c; border-color: #e8890c; color: #fff; }
+.btn-naranja:hover { background: #c8740a; border-color: #c8740a; }
+tr.fila-amano td { background: #fff4e3; }
+tr.fila-amano td:first-child { box-shadow: inset 4px 0 0 #e8890c; }
+tr.fila-amano:hover td { background: #ffe9c7; }
+.chip-amano { background: #e8890c; color: #fff; }
+
 .aviso {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
   background: var(--tinta); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: .9rem; box-shadow: var(--sombra);

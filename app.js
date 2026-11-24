@@ -762,9 +762,10 @@
         <select id="cli-orden" aria-label="Ordenar" style="width:auto">
           <option value="az">Orden: A → Z</option><option value="za">Orden: Z → A</option><option value="horas">Más horas</option><option value="visitas">Más visitas</option><option value="cobrado">Más cobrado en efectivo</option></select>
         <select id="cli-filtro" aria-label="Mostrar" style="width:auto">
-          <option value="mes">Con visitas este mes</option><option value="todos">Todos los clientes</option></select>
+          <option value="mes">Con visitas este mes</option><option value="todos">Todos los clientes</option><option value="amano">✏️ Escritos a mano</option></select>
         <button class="btn btn-sm btn-primario" id="cli-xls">Descargar Excel del mes</button>
       </div>
+      <div class="aviso-amano" id="cli-amano" hidden></div>
       <div class="resumen" id="cli-resumen"></div>
       <div class="tabla-envoltura" id="cli-tabla"></div>
       <p class="muted">Pulsa un cliente para ver su ficha y sus visitas del mes. Desactivar un cliente lo quita de la lista de las trabajadoras pero conserva su historial.</p>`;
@@ -787,9 +788,13 @@
   async function pintarClientes() {
     const mes = estado.cliMes, fin = new Date(mes.getFullYear(), mes.getMonth() + 1, 0);
     $("#cli-mes").textContent = `${MESES[mes.getMonth()]} ${mes.getFullYear()}`;
-    const { data, error } = await sb.from("trabajos").select("*").gte("fecha", ymd(mes)).lte("fecha", ymd(fin)).order("fecha");
+    const [{ data, error }, { data: sueltos }] = await Promise.all([
+      sb.from("trabajos").select("*").gte("fecha", ymd(mes)).lte("fecha", ymd(fin)).order("fecha"),
+      sb.from("trabajos").select("*").is("cliente_id", null).order("fecha"),   // escritos a mano, de cualquier mes
+    ]);
     if (error) return aviso(errorTxt(error), true);
     estado.cliTrabajos = data;
+    estado.cliSueltos = sueltos || [];
     pintarTablaClientes();
   }
 
@@ -810,13 +815,37 @@
     return [...st.values(), ...sueltos.values()].map((s) => { s.cobrado = r2(s.cobrado); return s; });
   }
 
+  // Clientes escritos a mano por las trabajadoras (todas las fechas), agrupados por nombre
+  function sueltosTodos() {
+    const g = new Map();
+    (estado.cliSueltos || []).forEach((t) => {
+      const nom = t.cliente.trim(), k = nom.toLowerCase();
+      const s = g.get(k) || { c: { id: null, nombre: nom + " (escrito a mano)", nombreOriginal: nom, direccion: "", telefono: "", activo: true }, min: 0, visitas: 0, cobrado: 0, gente: new Set(), lista: [] };
+      s.min += Number(t.minutos); s.visitas++; s.cobrado += Number(t.cobrado) || 0; s.gente.add(t.usuario_id); s.lista.push(t);
+      g.set(k, s);
+    });
+    return [...g.values()];
+  }
+
   function pintarTablaClientes() {
     const q = ($("#cli-buscar")?.value || "").trim().toLowerCase();
     const filtro = $("#cli-filtro")?.value || "mes";
     const todos = statsClientes();
-    const lista = todos
+    const pendientes = sueltosTodos();
+    const base = filtro === "amano" ? pendientes : todos;
+    const avisoEl = $("#cli-amano");
+    if (pendientes.length) {
+      const vis = pendientes.reduce((a, s) => a + s.visitas, 0);
+      avisoEl.hidden = false;
+      avisoEl.innerHTML = `<span>✏️ Hay <b>${pendientes.length} ${pendientes.length === 1 ? "cliente escrito" : "clientes escritos"} a mano</b> por las trabajadoras (${vis} ${vis === 1 ? "visita" : "visitas"}) sin asignar. Pulsa cada uno para pasarlo a un cliente de la lista o crear su ficha.</span>
+        ${filtro === "amano" ? `<button type="button" class="btn btn-sm" id="cli-amano-todos">Ver todos los clientes</button>` : `<button type="button" class="btn btn-sm btn-naranja" id="cli-amano-ver">Ver solo estos</button>`}`;
+      const sel = (v) => { $("#cli-filtro").value = v; pintarTablaClientes(); };
+      if ($("#cli-amano-ver")) $("#cli-amano-ver").onclick = () => sel("amano");
+      if ($("#cli-amano-todos")) $("#cli-amano-todos").onclick = () => sel("mes");
+    } else avisoEl.hidden = true;
+    const lista = base
       .filter((s) => !q || normal(s.c.nombre).includes(normal(q)) || normal(s.c.direccion).includes(normal(q)) || normal(s.c.telefono).includes(normal(q)))
-      .filter((s) => filtro === "todos" || s.visitas > 0)
+      .filter((s) => filtro === "todos" || filtro === "amano" || s.visitas > 0)
       .sort((a, b) => {
         const az = a.c.nombre.localeCompare(b.c.nombre, "es", { sensitivity: "base" });
         switch ($("#cli-orden")?.value || "az") {
@@ -836,13 +865,13 @@
     const cero = '<span class="cero">·</span>';
     $("#cli-tabla").innerHTML = `<table>
       <thead><tr><th>Cliente</th><th>Teléfono</th><th class="num">Horas</th><th class="num">Visitas</th><th class="num">Cobrado en efectivo</th><th>Quién ha ido</th><th>Estado</th></tr></thead>
-      <tbody>${lista.map((s) => `<tr class="fila-click" data-cli="${s.c.id ?? ""}" data-suelto="${s.c.id ? "" : esc(s.c.nombreOriginal)}">
+      <tbody>${lista.map((s) => `<tr class="fila-click ${s.c.id ? "" : "fila-amano"}" data-cli="${s.c.id ?? ""}" data-suelto="${s.c.id ? "" : esc(s.c.nombreOriginal)}">
         <td><b>${esc(s.c.nombre)}</b>${s.c.direccion ? `<div class="muted" style="font-size:.78rem">${esc(s.c.direccion)}</div>` : ""}</td>
         <td class="muted">${esc(s.c.telefono) || "—"}</td>
         <td class="num">${s.min ? fmtMin(s.min) : cero}</td><td class="num">${s.visitas || cero}</td>
         <td class="num"><b>${s.cobrado ? eur(s.cobrado) : cero}</b></td>
         <td class="muted">${[...s.gente].map((id) => esc(nombreDe(estado.perfiles.find((p) => p.id === id)))).join(", ")}</td>
-        <td>${s.c.id ? `<span class="chip ${s.c.activo ? "chip-activo" : "chip-inactivo"}">${s.c.activo ? "Activo" : "Inactivo"}</span>` : '<span class="chip chip-ausencia">Sin ficha · asignar</span>'}</td></tr>`).join("")
+        <td>${s.c.id ? `<span class="chip ${s.c.activo ? "chip-activo" : "chip-inactivo"}">${s.c.activo ? "Activo" : "Inactivo"}</span>` : '<span class="chip chip-amano">✏️ Escrito a mano · asignar</span>'}</td></tr>`).join("")
         || `<tr><td colspan="7" class="vacio">${q ? "Ningún cliente coincide con la búsqueda." : filtro === "mes" ? "Ningún cliente tiene visitas este mes. Cambia a «Todos los clientes» para verlos." : "No hay clientes. Pulsa «+ Nuevo cliente» o «Pegar lista»."}</td></tr>`}</tbody>
       ${lista.length > 1 ? `<tfoot><tr><td>Total</td><td></td><td class="num">${fmtMin(T.min)}</td><td class="num">${T.vis}</td><td class="num">${eur(T.cob)}</td><td></td><td></td></tr></tfoot>` : ""}
     </table>`;
@@ -851,12 +880,12 @@
 
   // Cliente escrito a mano por una trabajadora: asignarlo a un cliente existente o crear su ficha
   function asignarSuelto(nombre) {
-    const s = statsClientes().find((x) => !x.c.id && x.c.nombreOriginal === nombre);
+    const s = sueltosTodos().find((x) => x.c.nombreOriginal.toLowerCase() === nombre.toLowerCase());
     if (!s) return;
     const opts = estado.clientes.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`).join("");
     abrirModal("Asignar cliente", `
       <form id="form-suelto">
-        <p style="margin:0">Las trabajadoras han apuntado <b>«${esc(nombre)}»</b>: ${s.visitas} ${s.visitas === 1 ? "visita" : "visitas"} y ${fmtMin(s.min)} h este mes
+        <p style="margin:0">Las trabajadoras han apuntado <b>«${esc(nombre)}»</b>: ${s.visitas} ${s.visitas === 1 ? "visita" : "visitas"} y ${fmtMin(s.min)} h en total
           (${[...s.gente].map((id) => esc(nombreDe(estado.perfiles.find((p) => p.id === id)))).join(", ")}).</p>
         <label for="su-modo">¿Qué es?</label>
         <select id="su-modo"><option value="existe">Es un cliente que ya tengo en la lista</option><option value="nuevo">Es un cliente nuevo: crear su ficha</option></select>
