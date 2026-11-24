@@ -54,6 +54,7 @@ Menú **Usuarios → + Nuevo usuario**: usuario, contraseña inicial, nombre, ho
 | Trabajador | **Calendario** → en cada día escribe el cliente y el tiempo; **+ Añadir cliente** para el siguiente. Se guarda solo. Arriba ve sus horas, el contrato, las extras y el importe. |
 | Master | **Calendario** → elige la persona en el desplegable para ver o corregir sus horas. |
 | Master | **Informes semanales** → «Semana pasada» para el informe de lunes a domingo cerrado. Flechas para ir a otras semanas. «Descargar Excel» o «Imprimir / PDF». |
+| Master | **Clientes → 📄 Extracto mensual (€)** → cada cliente con sus visitas, € por visita, total, pagado en efectivo y por cobrar; al final el resumen del mes. Precio general por hora + precio propio opcional en la ficha de cada cliente. |
 | Master | **Clientes** → ficha de cada cliente. Por mes: horas, visitas, **cobrado en efectivo** y quién ha ido. «Descargar Excel del mes» (resumen + detalle por cliente). |
 | Master | **Informes semanales** → en la ficha de cada una: anticipos, observaciones y fecha de entrega. **Descargar Excel** → hoja vertical por semana (salmón/verde alternando), como la de papel. |
 | Master | **Usuarios** → pulsa una fila para editar la ficha, desactivar a alguien (no puede entrar pero conserva su historial) o hacerlo master. |

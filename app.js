@@ -746,8 +746,26 @@
   // ================================================================ CLIENTES Y FACTURACIÓN (master)
   const r2 = (x) => Math.round(x * 100) / 100;
 
+  // ---- Precios a clientes (solo master): precio general por hora + precio propio opcional
+  async function cargarPrecios() {
+    const [{ data: ta, error: e1 }, { data: aj }] = await Promise.all([sb.from("tarifas").select("*"), sb.from("ajustes").select("*")]);
+    estado.tarifas = new Map((e1 ? [] : ta || []).map((t) => [String(t.cliente_id), t]));
+    estado.preciosListos = !e1;
+    estado.precioGeneral = Number((aj || []).find((x) => x.clave === "precio_hora_clientes")?.valor) || 0;
+  }
+  const tarifaDe = (id) => { const t = estado.tarifas?.get(String(id)); return t && Number(t.importe) > 0 ? t : null; };
+  // Precio que se aplica a una visita: el propio del cliente o, si no tiene, el general por hora
+  function precioVisita(t) {
+    const ta = t.cliente_id ? tarifaDe(t.cliente_id) : null;
+    if (ta) return ta.tipo === "servicio"
+      ? { importe: r2(Number(ta.importe)), texto: `${num2(ta.importe)} €/servei` }
+      : { importe: r2((Number(t.minutos) / 60) * Number(ta.importe)), texto: `${num2(ta.importe)} €/h` };
+    const g = estado.precioGeneral || 0;
+    return { importe: r2((Number(t.minutos) / 60) * g), texto: g ? `${num2(g)} €/h` : "SENSE PREU" };
+  }
+
   async function vistaClientes() {
-    await Promise.all([cargarListaClientes(), cargarPerfiles()]);
+    await Promise.all([cargarListaClientes(), cargarPerfiles(), cargarPrecios()]);
     $("#contenido").innerHTML = `
       <div class="barra"><h1>Clientes</h1><span class="espacio"></span>
         <button class="btn" id="cli-unificar">🔗 Unificar clientes</button>
@@ -764,7 +782,8 @@
           <option value="az">Orden: A → Z</option><option value="za">Orden: Z → A</option><option value="horas">Más horas</option><option value="visitas">Más visitas</option><option value="cobrado">Más cobrado en efectivo</option></select>
         <select id="cli-filtro" aria-label="Mostrar" style="width:auto">
           <option value="mes">Con visitas este mes</option><option value="todos">Todos los clientes</option><option value="amano">✏️ Escritos a mano</option></select>
-        <button class="btn btn-sm btn-primario" id="cli-xls">Descargar Excel del mes</button>
+        <button class="btn btn-sm" id="cli-xls">Excel del mes</button>
+        <button class="btn btn-sm btn-primario" id="cli-extracto">📄 Extracto mensual (€)</button>
       </div>
       <div class="aviso-amano" id="cli-amano" hidden></div>
       <div class="resumen" id="cli-resumen"></div>
@@ -779,6 +798,7 @@
     $("#cli-buscar").oninput = () => pintarTablaClientes();
     $("#cli-filtro").onchange = () => pintarTablaClientes();
     $("#cli-orden").onchange = () => pintarTablaClientes();
+    $("#cli-extracto").onclick = dialogoExtracto;
     $("#cli-xls").onclick = async (e) => {
       e.target.disabled = true;
       try { mostrarPrevia(await excelClientesMes()); } catch (err) { aviso("No se pudo generar el Excel: " + (err.message || err), true); }
@@ -927,6 +947,7 @@
   function editarCliente(id) {
     const c = id ? clientePorId(id) : { nombre: "", direccion: "", telefono: "", notas: "", activo: true };
     const s = id ? statsClientes().find((x) => String(x.c.id) === String(id)) : null;
+    const ta = id ? tarifaDe(id) : null;
     const mes = estado.cliMes;
     abrirModal(id ? c.nombre : "Nuevo cliente", `
       <form id="form-cli">
@@ -935,6 +956,11 @@
           <div class="ancho"><label for="c-dir">Dirección</label><input id="c-dir" value="${esc(c.direccion)}"></div>
           <div><label for="c-tel">Teléfono</label><input id="c-tel" type="tel" value="${esc(c.telefono)}"></div>
           <div><label for="c-activo">Estado</label><select id="c-activo"><option value="1" ${c.activo ? "selected" : ""}>Activo (sale en la lista)</option><option value="0" ${!c.activo ? "selected" : ""}>Inactivo</option></select></div>
+          <div><label for="c-ttipo">Precio para este cliente</label><select id="c-ttipo">
+            <option value="general" ${!ta ? "selected" : ""}>Precio general (${estado.precioGeneral ? eur(estado.precioGeneral) + "/h" : "sin definir"})</option>
+            <option value="hora" ${ta?.tipo === "hora" ? "selected" : ""}>Precio propio por hora</option>
+            <option value="servicio" ${ta?.tipo === "servicio" ? "selected" : ""}>Precio fijo por visita</option></select></div>
+          <div id="c-timp-w" ${ta ? "" : "hidden"}><label for="c-timp" id="c-timp-l">Importe (€)</label><input id="c-timp" type="number" min="0" step="0.5" value="${ta ? Number(ta.importe) : ""}" placeholder="0"></div>
           <div class="ancho"><label for="c-notas">Notas (llaves, horario, lo que haya que saber…)</label><textarea id="c-notas">${esc(c.notas)}</textarea></div>
         </div>
         ${s ? `<div class="barra" style="margin-top:18px"><h3>${MESES[mes.getMonth()][0].toUpperCase() + MESES[mes.getMonth()].slice(1)} ${mes.getFullYear()}: ${s.visitas} ${s.visitas === 1 ? "visita" : "visitas"} · ${fmtMin(s.min)} h ${s.cobrado ? ` · cobrado en efectivo ${eur(s.cobrado)}` : ""}</h3>
@@ -954,6 +980,12 @@
     if (s?.visitas) $("#c-xls").onclick = async () => {
       try { mostrarPrevia(await excelUnCliente(id), () => editarCliente(id), "‹ Volver a la ficha del cliente"); } catch (err) { $("#c-error").textContent = "No se pudo generar el Excel: " + (err.message || err); }
     };
+    const etiquetaPrecio = () => {
+      const tipo = $("#c-ttipo").value;
+      $("#c-timp-w").hidden = tipo === "general";
+      $("#c-timp-l").textContent = tipo === "servicio" ? "Precio por visita (€)" : "Precio por hora (€)";
+    };
+    $("#c-ttipo").onchange = etiquetaPrecio; etiquetaPrecio();
     if (id) $("#c-unificar").onclick = () => unificarClientes([id]);
     document.querySelectorAll("[data-visita]").forEach((b) => (b.onclick = () => {
       const t = s.lista.find((x) => String(x.id) === b.dataset.visita);
@@ -978,6 +1010,12 @@
       if (res.error) return ($("#c-error").textContent = /duplicate|unique/i.test(res.error.message) ? "Ya hay un cliente con ese nombre." : errorTxt(res.error));
       const cid = res.data.id;
       if (id) await sb.from("trabajos").update({ cliente: v.nombre }).eq("cliente_id", id);
+      const tipo = $("#c-ttipo").value, imp = Math.max(0, parseFloat(String($("#c-timp").value).replace(",", ".")) || 0);
+      const rt = tipo === "general" || !imp
+        ? await sb.from("tarifas").delete().eq("cliente_id", cid)
+        : await sb.from("tarifas").upsert({ cliente_id: cid, tipo, importe: imp }, { onConflict: "cliente_id" });
+      if (rt.error) return ($("#c-error").textContent = "Cliente guardado, pero el precio no: " + (/tarifas|relation|schema cache/i.test(rt.error.message) ? "falta ejecutar actualizacion_7.sql en Supabase." : errorTxt(rt.error)));
+      await cargarPrecios();
       cerrarModal(); aviso(id ? "Cliente guardado" : "Cliente creado"); await cargarListaClientes(); pintarTablaClientes();
     };
   }
@@ -1366,6 +1404,8 @@
     const d = sumarDias(l, 6);
     return `S${numSemana(l)} · ${l.getDate()}${l.getMonth() !== d.getMonth() ? " " + MESES[l.getMonth()].slice(0, 3) : ""}–${d.getDate()} ${MESES[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
   };
+  // Fecha para Excel: a medianoche UTC, para que no salga un día antes en España
+  const fechaXls = (k) => { const [a, m, d] = k.split("-").map(Number); return new Date(Date.UTC(a, m - 1, d)); };
   const CA_DIES = ["DILLUNS", "DIMARTS", "DIMECRES", "DIJOUS", "DIVENDRES", "DISSABTE", "DIUMENGE"];
   const CA_MESOS = ["GENER", "FEBRER", "MARÇ", "ABRIL", "MAIG", "JUNY", "JULIOL", "AGOST", "SETEMBRE", "OCTUBRE", "NOVEMBRE", "DESEMBRE"];
   const deMes = (m) => (/^[AEIOU]/.test(CA_MESOS[m]) ? "D'" : "DE ") + CA_MESOS[m];
@@ -1627,7 +1667,7 @@
     const lista = s.lista.slice().sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id));
     lista.forEach((t) => {
       const d = deYmd(t.fecha);
-      const row = ws.addRow([CA_DIES[(d.getDay() + 6) % 7], d, nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), Number(t.minutos) / 1440, Number(t.cobrado) || null]);
+      const row = ws.addRow([CA_DIES[(d.getDay() + 6) % 7], fechaXls(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), Number(t.minutos) / 1440, Number(t.cobrado) || null]);
       const col = colorSemana(lunesDe(d)).suave;   // semanas alternando salmón / verde
       row.eachCell({ includeEmpty: true }, (x) => { x.fill = fill(col); x.border = { top: fino, left: fino, bottom: fino, right: fino }; });
     });
@@ -1645,6 +1685,126 @@
     ws.getCell(rp, 2).value = fechaPunto(new Date());
     const nom = c.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
     return { wb, nombre: `client_${nom}_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx` };
+  }
+
+  // ---- Extracto mensual de clientes con €: visitas, importe, pagado y pendiente
+  function dialogoExtracto() {
+    if (!estado.preciosListos) return aviso("Para el extracto en € falta ejecutar actualizacion_7.sql en Supabase.", true);
+    const mes = estado.cliMes;
+    const sinPropio = statsClientes().filter((s) => s.visitas && !(s.c.id && tarifaDe(s.c.id))).length;
+    abrirModal("Extracto mensual", `
+      <form id="form-ext">
+        <p style="margin:0">Extracto de <b>${MESES[mes.getMonth()]} ${mes.getFullYear()}</b>: cada cliente con sus visitas, los € de cada una, lo que ya han pagado en efectivo y lo que queda por cobrar.</p>
+        <label for="ext-precio">Precio general por hora a clientes (€)</label>
+        <input id="ext-precio" type="number" min="0" step="0.5" value="${estado.precioGeneral || ""}" placeholder="ej. 15" style="max-width:200px">
+        <p class="muted" style="font-size:.85rem;margin:6px 0 0">Se usa en los clientes que no tienen precio propio (${sinPropio} este mes). Para poner un precio distinto a un cliente, ábrelo y cambia «Precio para este cliente».</p>
+        <p class="error" id="ext-error"></p>
+        <div class="acciones"><button type="button" class="btn" data-cerrar>Cancelar</button>
+          <button type="submit" class="btn btn-primario" id="ext-btn">Ver extracto</button></div>
+      </form>`);
+    $("#form-ext").onsubmit = async (e) => {
+      e.preventDefault();
+      const g = Math.max(0, parseFloat(String($("#ext-precio").value).replace(",", ".")) || 0);
+      $("#ext-btn").disabled = true;
+      if (g !== estado.precioGeneral) {
+        const { error } = await sb.from("ajustes").upsert({ clave: "precio_hora_clientes", valor: String(g) }, { onConflict: "clave" });
+        if (error) { $("#ext-btn").disabled = false; return ($("#ext-error").textContent = errorTxt(error)); }
+        estado.precioGeneral = g;
+      }
+      try { mostrarPrevia(await excelExtracto(), dialogoExtracto, "‹ Cambiar precio general"); }
+      catch (err) { $("#ext-btn").disabled = false; $("#ext-error").textContent = "No se pudo generar: " + (err.message || err); }
+    };
+  }
+
+  async function excelExtracto() {
+    await cargarExcelJS();
+    const mes = estado.cliMes;
+    const wb = new ExcelJS.Workbook();
+    const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+    const fino = { style: "thin", color: { argb: "FFBFC5CE" } };
+    const EUR = '#,##0.00 "€"', EURV = '#,##0.00 "€";-#,##0.00 "€";""', HH = '[h]:mm;;""';
+    const ws = wb.addWorksheet("Extracte", {
+      pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true,
+        margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } },
+      views: [{ showGridLines: false }],
+    });
+    // A dia | B data | C treballadora | D hores | E preu | F import | G pagat
+    ws.columns = [10, 11, 20, 8, 13, 12, 12].map((w) => ({ width: w }));
+    ws.mergeCells("A1:G1");
+    ws.getCell("A1").value = `EXTRACTE MENSUAL DE CLIENTS · ${CA_MESOS[mes.getMonth()]} ${mes.getFullYear()}`;
+    ws.getCell("A1").font = { bold: true, size: 14 };
+    ws.mergeCells("A2:G2");
+    ws.getCell("A2").value = `Preu general: ${estado.precioGeneral ? num2(estado.precioGeneral) + " €/h" : "sense definir"} · Preparat: ${fechaPunto(new Date())}`;
+    ws.getCell("A2").font = { color: { argb: "FF555F6D" } };
+    let r = 4;
+    const lista = statsClientes().filter((s) => s.visitas).sort((a, b) => a.c.nombre.localeCompare(b.c.nombre, "es", { sensitivity: "base" }));
+    const totales = [];
+    const G = { min: 0, imp: 0, pag: 0 };
+    lista.forEach((s, i) => {
+      const col = i % 2 ? { cab: "FFE2EFD9", fila: "FFF3F9F0" } : { cab: "FFFCE4D6", fila: "FFFEF4EE" };
+      // Cabecera del cliente
+      ws.mergeCells(r, 1, r, 7);
+      const ta = s.c.id ? tarifaDe(s.c.id) : null;
+      const precioTxt = ta ? (ta.tipo === "servicio" ? `${num2(ta.importe)} € per visita` : `${num2(ta.importe)} €/h`) : (estado.precioGeneral ? `${num2(estado.precioGeneral)} €/h (general)` : "sense preu");
+      const cc = ws.getCell(r, 1);
+      cc.value = `${s.c.nombre.toUpperCase()}   ·   ${precioTxt}`;
+      cc.font = { bold: true, size: 12 }; cc.fill = fill(col.cab); cc.border = { top: { style: "medium" } }; cc.alignment = { horizontal: "left", vertical: "middle" };
+      ws.getRow(r).height = 20;
+      r++;
+      const cab = ws.getRow(r);
+      cab.values = ["DIA", "DATA", "TREBALLADORA", "HORES", "PREU", "IMPORT", "PAGAT"];
+      cab.font = { bold: true, size: 9, color: { argb: "FF4A5768" } };
+      cab.eachCell((x) => { x.border = { bottom: fino }; x.alignment = { horizontal: x.col >= 4 ? "right" : "left" }; });
+      r++;
+      const ini = r;
+      s.lista.slice().sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id)).forEach((t) => {
+        const d = deYmd(t.fecha), pv = precioVisita(t);
+        const row = ws.getRow(r);
+        row.values = [CA_DIES[(d.getDay() + 6) % 7], fechaXls(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), Number(t.minutos) / 1440, pv.texto, pv.importe, Number(t.cobrado) || null];
+        row.eachCell({ includeEmpty: true }, (x) => { if (x.col <= 7) { x.fill = fill(col.fila); x.border = { bottom: fino }; } });
+        row.getCell(2).numFmt = "dd/mm/yyyy"; row.getCell(4).numFmt = HH; row.getCell(6).numFmt = EURV; row.getCell(7).numFmt = EURV;
+        [4, 5, 6, 7].forEach((k) => (row.getCell(k).alignment = { horizontal: "right" }));
+        G.min += Number(t.minutos); G.imp += pv.importe; G.pag += Number(t.cobrado) || 0;
+        r++;
+      });
+      const fin = r - 1;
+      const impCli = r2(s.lista.reduce((a, t) => a + precioVisita(t).importe, 0)), pagCli = r2(s.cobrado);
+      const tr = ws.getRow(r);
+      tr.values = ["TOTAL", "", `${s.visitas} ${s.visitas === 1 ? "visita" : "visites"}`,
+        { formula: `SUM(D${ini}:D${fin})`, result: s.min / 1440 }, "",
+        { formula: `SUM(F${ini}:F${fin})`, result: impCli }, { formula: `SUM(G${ini}:G${fin})`, result: pagCli }];
+      tr.font = { bold: true };
+      tr.eachCell({ includeEmpty: true }, (x) => { if (x.col <= 7) { x.fill = fill(col.cab); x.border = { top: fino }; } });
+      tr.getCell(4).numFmt = HH; tr.getCell(6).numFmt = EURV; tr.getCell(7).numFmt = EURV;
+      [4, 6, 7].forEach((k) => (tr.getCell(k).alignment = { horizontal: "right" }));
+      totales.push(r);
+      r++;
+      const pr = ws.getRow(r);
+      ws.mergeCells(r, 1, r, 5);
+      pr.getCell(1).value = "PER COBRAR"; pr.getCell(1).alignment = { horizontal: "right" };
+      ws.mergeCells(r, 6, r, 7);
+      pr.getCell(6).value = { formula: `F${r - 1}-G${r - 1}`, result: r2(impCli - pagCli) };
+      pr.getCell(6).numFmt = EUR; pr.getCell(6).alignment = { horizontal: "right" };
+      pr.font = { bold: true, color: { argb: "FFB3261E" } };
+      r += 2;
+    });
+    // Totales generales
+    const ref = (c) => totales.map((x) => `${c}${x}`).join(",") || "0";
+    const caja = { top: { style: "medium" }, bottom: { style: "medium" }, left: { style: "medium" }, right: { style: "medium" } };
+    const filaTotal = (etq, formula, valor, fmt, fondo, color) => {
+      ws.mergeCells(r, 1, r, 5);
+      const a = ws.getCell(r, 1); a.value = etq; a.font = { bold: true, size: 12 }; a.alignment = { horizontal: "right", vertical: "middle" };
+      ws.mergeCells(r, 6, r, 7);
+      const b = ws.getCell(r, 6); b.value = { formula, result: valor }; b.numFmt = fmt; b.font = { bold: true, size: 12, color: color ? { argb: color } : undefined };
+      b.fill = fill(fondo); b.border = caja; b.alignment = { horizontal: "center", vertical: "middle" };
+      ws.getRow(r).height = 22; r++;
+    };
+    ws.mergeCells(r, 1, r, 7); ws.getCell(r, 1).value = "RESUM DEL MES"; ws.getCell(r, 1).font = { bold: true, size: 13 }; ws.getCell(r, 1).border = { bottom: { style: "medium" } }; r += 2;
+    filaTotal(`TOTAL HORES (${lista.reduce((a, s) => a + s.visitas, 0)} visites, ${lista.length} clients)`, `SUM(${ref("D")})`, G.min / 1440, "[h]:mm", "FFE3E7ED");
+    filaTotal("TOTAL €", `SUM(${ref("F")})`, r2(G.imp), EUR, "FFE3E7ED");
+    filaTotal("TOTAL PAGAT (efectiu)", `SUM(${ref("G")})`, r2(G.pag), EUR, "FFE2EFD9");
+    filaTotal("TOTAL PER COBRAR", `SUM(${ref("F")})-SUM(${ref("G")})`, r2(G.imp - G.pag), EUR, "FFFCE4D6", "FFB3261E");
+    return { wb, nombre: `extracte_clients_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx` };
   }
 
   // Excel mensual por cliente: horas, visitas y lo cobrado en efectivo (sección Clientes)
@@ -1678,7 +1838,7 @@
     const cab2 = det.getRow(1); cab2.values = ["CLIENT", "DATA", "TREBALLADORA", "HORES", "COBRAT EN EFECTIU"]; cabecera(cab2);
     lista.forEach((s) => {
       s.lista.sort((a, b) => (a.fecha < b.fecha ? -1 : 1)).forEach((t) => {
-        det.addRow([s.c.nombre, deYmd(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), t.minutos / 1440, Number(t.cobrado) || null]);
+        det.addRow([s.c.nombre, fechaXls(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), t.minutos / 1440, Number(t.cobrado) || null]);
       });
       const sub = det.addRow([`TOTAL ${s.c.nombre}`, "", "", s.min / 1440, s.cobrado || null]);
       sub.font = { bold: true }; sub.eachCell((c) => (c.fill = fill("FFE2EFD9")));
@@ -1695,7 +1855,7 @@
     if (v && typeof v === "object" && !(v instanceof Date)) v = "result" in v ? v.result : v.richText ? v.richText.map((r) => r.text).join("") : v.text ?? "";
     if (v === null || v === undefined || v === "") return "";
     const f = cell.numFmt || "";
-    if (v instanceof Date) return `${dd(v.getDate())}/${dd(v.getMonth() + 1)}/${v.getFullYear()}`;
+    if (v instanceof Date) return `${dd(v.getUTCDate())}/${dd(v.getUTCMonth() + 1)}/${v.getUTCFullYear()}`;
     if (typeof v === "number") {
       if (v === 0 && /;""\s*$|;;""/.test(f)) return "";
       if (f.includes("[h]:mm")) return fmtH(v * 24);
