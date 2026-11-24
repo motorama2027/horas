@@ -295,6 +295,17 @@ tr.fila-amano td:first-child { box-shadow: inset 4px 0 0 #e8890c; }
 tr.fila-amano:hover td { background: #ffe9c7; }
 .chip-amano { background: #e8890c; color: #fff; }
 
+.uni-lista { margin-top: 10px; max-height: 46vh; overflow-y: auto; border: 1px solid var(--linea); border-radius: 8px; }
+.uni-fila { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 12px; border-bottom: 1px solid var(--linea); font-size: .92rem; font-weight: 500; color: var(--tinta); cursor: pointer; }
+.uni-fila:last-child { border-bottom: 0; }
+.uni-fila:hover { background: #f8fafd; }
+.uni-fila.marcada { background: var(--acento-suave); }
+.uni-fila input[type="checkbox"] { width: 18px; height: 18px; flex: none; }
+.uni-nombre { flex: 1; }
+.uni-queda { display: flex; align-items: center; gap: 6px; font-size: .82rem; font-weight: 700; color: var(--acento); white-space: nowrap; }
+.uni-queda input { width: 16px; height: 16px; }
+.uni-aviso { margin-top: 12px; background: var(--aviso-suave); border-left: 4px solid #e8890c; border-radius: 8px; padding: 10px 14px; font-size: .9rem; color: #6b3f00; }
+
 .aviso {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 60;
   background: var(--tinta); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: .9rem; box-shadow: var(--sombra);

@@ -750,6 +750,7 @@
     await Promise.all([cargarListaClientes(), cargarPerfiles()]);
     $("#contenido").innerHTML = `
       <div class="barra"><h1>Clientes</h1><span class="espacio"></span>
+        <button class="btn" id="cli-unificar">🔗 Unificar clientes</button>
         <button class="btn" id="cli-pegar">Pegar lista</button>
         <button class="btn btn-primario" id="cli-nuevo">+ Nuevo cliente</button></div>
       <div class="barra">
@@ -771,6 +772,7 @@
       <p class="muted">Pulsa un cliente para ver su ficha y sus visitas del mes. Desactivar un cliente lo quita de la lista de las trabajadoras pero conserva su historial.</p>`;
     $("#cli-nuevo").onclick = () => editarCliente(null);
     $("#cli-pegar").onclick = pegarClientes;
+    $("#cli-unificar").onclick = () => unificarClientes([]);
     $("#cli-prev").onclick = () => { estado.cliMes = new Date(estado.cliMes.getFullYear(), estado.cliMes.getMonth() - 1, 1); pintarClientes(); };
     $("#cli-next").onclick = () => { estado.cliMes = new Date(estado.cliMes.getFullYear(), estado.cliMes.getMonth() + 1, 1); pintarClientes(); };
     $("#cli-hoy").onclick = () => { estado.cliMes = inicioMes(new Date()); pintarClientes(); };
@@ -942,7 +944,8 @@
           </tbody></table></div>` : `<p class="muted">Sin visitas este mes.</p>`}` : ""}
         <p class="error" id="c-error"></p>
         <div class="acciones">
-          ${id ? `<button type="button" class="btn btn-peligro izq" id="c-borrar">Borrar cliente</button>` : ""}
+          ${id ? `<button type="button" class="btn btn-peligro izq" id="c-borrar">Borrar cliente</button>
+          <button type="button" class="btn" id="c-unificar">🔗 Unificar con otro cliente</button>` : ""}
           <button type="button" class="btn" data-cerrar>Cancelar</button>
           <button type="submit" class="btn btn-primario">Guardar</button>
         </div>
@@ -950,6 +953,7 @@
     if (s?.visitas) $("#c-xls").onclick = async () => {
       try { mostrarPrevia(await excelUnCliente(id), () => editarCliente(id), "‹ Volver a la ficha del cliente"); } catch (err) { $("#c-error").textContent = "No se pudo generar el Excel: " + (err.message || err); }
     };
+    if (id) $("#c-unificar").onclick = () => unificarClientes([id]);
     if (id) $("#c-borrar").onclick = async () => {
       if ($("#c-borrar").dataset.ok !== "1") {
         $("#c-borrar").dataset.ok = "1";
@@ -970,6 +974,84 @@
       const cid = res.data.id;
       if (id) await sb.from("trabajos").update({ cliente: v.nombre }).eq("cliente_id", id);
       cerrarModal(); aviso(id ? "Cliente guardado" : "Cliente creado"); await cargarListaClientes(); pintarTablaClientes();
+    };
+  }
+
+  // Unificar clientes duplicados: todas las visitas pasan al que se queda y los demás se borran
+  function unificarClientes(preseleccion) {
+    const marcados = new Set(preseleccion.map(String));
+    let seQueda = preseleccion[0] ? String(preseleccion[0]) : "";
+    abrirModal("Unificar clientes", `
+      <form id="form-uni">
+        <p class="muted" style="margin:0 0 8px">Marca los clientes que son el mismo (por ejemplo «ARENYS» y «ANA (ARENYS)») y elige cuál se queda.</p>
+        <input id="uni-buscar" type="search" placeholder="🔍 Buscar cliente…" autocomplete="off" aria-label="Buscar cliente">
+        <div class="uni-lista" id="uni-lista"></div>
+        <div id="uni-resumen"></div>
+        <p class="error" id="uni-error"></p>
+        <div class="acciones"><button type="button" class="btn" data-cerrar>Cancelar</button>
+          <button type="submit" class="btn btn-primario" id="uni-btn" disabled>Unificar</button></div>
+      </form>`);
+    $("#modal .modal-caja").classList.add("modal-ancha");
+    const pintar = () => {
+      const q = normal($("#uni-buscar").value);
+      const lista = estado.clientes.filter((c) => marcados.has(String(c.id)) || !q || normal(c.nombre).includes(q) || normal(c.direccion).includes(q));
+      // los marcados, arriba
+      lista.sort((a, b) => (marcados.has(String(b.id)) - marcados.has(String(a.id))) || a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" }));
+      $("#uni-lista").innerHTML = lista.map((c) => {
+        const id = String(c.id), on = marcados.has(id);
+        return `<label class="uni-fila ${on ? "marcada" : ""}">
+          <input type="checkbox" data-uni="${id}" ${on ? "checked" : ""}>
+          <span class="uni-nombre">${esc(c.nombre)}${c.direccion ? ` <span class="muted">· ${esc(c.direccion)}</span>` : ""}${c.activo ? "" : ' <span class="chip chip-inactivo">Inactivo</span>'}</span>
+          ${on && marcados.size > 1 ? `<span class="uni-queda"><input type="radio" name="uni-queda" value="${id}" ${seQueda === id ? "checked" : ""}> Se queda</span>` : ""}
+        </label>`;
+      }).join("") || `<p class="muted" style="padding:10px">Ningún cliente coincide.</p>`;
+      document.querySelectorAll("[data-uni]").forEach((ch) => (ch.onchange = () => {
+        if (ch.checked) { marcados.add(ch.dataset.uni); if (!seQueda) seQueda = ch.dataset.uni; }
+        else { marcados.delete(ch.dataset.uni); if (seQueda === ch.dataset.uni) seQueda = [...marcados][0] || ""; }
+        pintar();
+      }));
+      document.querySelectorAll('[name="uni-queda"]').forEach((r) => (r.onchange = () => { seQueda = r.value; pintar(); }));
+      const ok = marcados.size > 1 && marcados.has(seQueda);
+      $("#uni-btn").disabled = !ok;
+      if (ok) {
+        const queda = clientePorId(seQueda), van = [...marcados].filter((x) => x !== seQueda).map(clientePorId);
+        $("#uni-resumen").innerHTML = `<div class="uni-aviso">Todas las visitas de <b>${van.map((c) => esc(c.nombre)).join("</b>, <b>")}</b> (de todas las trabajadoras y todos los meses)
+          pasarán a <b>${esc(queda.nombre)}</b>, y ${van.length === 1 ? "ese cliente se borrará" : "esos clientes se borrarán"}. Esto no se puede deshacer.</div>`;
+      } else {
+        $("#uni-resumen").innerHTML = marcados.size === 1 ? `<p class="muted" style="margin:8px 0 0">Marca al menos otro cliente para unificarlo con este.</p>` : "";
+      }
+    };
+    $("#uni-buscar").oninput = pintar;
+    pintar();
+    setTimeout(() => $("#uni-buscar").focus(), 50);
+    $("#form-uni").onsubmit = async (e) => {
+      e.preventDefault();
+      const queda = clientePorId(seQueda);
+      const van = [...marcados].filter((x) => x !== seQueda).map(Number);
+      if (!queda || !van.length) return;
+      $("#uni-btn").disabled = true; $("#uni-btn").textContent = "Unificando…";
+      try {
+        // 1) Pasar todas las visitas al cliente que se queda
+        const r1 = await sb.from("trabajos").update({ cliente_id: queda.id, cliente: queda.nombre }).in("cliente_id", van);
+        if (r1.error) throw r1.error;
+        // 2) Completar la ficha del que se queda con datos que le falten (dirección, teléfono, notas)
+        const otros = van.map(clientePorId).filter(Boolean);
+        const extra = {};
+        if (!queda.direccion) { const d = otros.find((c) => c.direccion)?.direccion; if (d) extra.direccion = d; }
+        if (!queda.telefono) { const t = otros.find((c) => c.telefono)?.telefono; if (t) extra.telefono = t; }
+        const notas = otros.map((c) => c.notas).filter(Boolean);
+        if (notas.length) extra.notas = [queda.notas, ...notas].filter(Boolean).join("\n");
+        if (Object.keys(extra).length) { const r2 = await sb.from("clientes").update(extra).eq("id", queda.id); if (r2.error) throw r2.error; }
+        // 3) Borrar los duplicados
+        const r3 = await sb.from("clientes").delete().in("id", van);
+        if (r3.error) throw r3.error;
+        cerrarModal();
+        aviso(`${van.length + 1} clientes unificados en ${queda.nombre}`);
+        await cargarListaClientes(); pintarClientes();
+      } catch (err) {
+        $("#uni-error").textContent = errorTxt(err);
+        $("#uni-btn").disabled = false; $("#uni-btn").textContent = "Unificar";
+      }
     };
   }
 
