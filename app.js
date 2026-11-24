@@ -983,7 +983,7 @@
     let seQueda = preseleccion[0] ? String(preseleccion[0]) : "";
     abrirModal("Unificar clientes", `
       <form id="form-uni">
-        <p class="muted" style="margin:0 0 8px">Marca los clientes que son el mismo (por ejemplo «ARENYS» y «ANA (ARENYS)») y elige cuál se queda.</p>
+        <p class="muted" style="margin:0 0 8px">Marca los clientes que son el mismo (por ejemplo «AP.3SORT» y «AP. 3 SORT») y elige cuál se queda.</p>
         <input id="uni-buscar" type="search" placeholder="🔍 Buscar cliente…" autocomplete="off" aria-label="Buscar cliente">
         <div class="uni-lista" id="uni-lista"></div>
         <div id="uni-resumen"></div>
