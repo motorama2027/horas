@@ -1814,37 +1814,110 @@
     const wb = new ExcelJS.Workbook();
     const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
     const EUR = '#,##0.00 "€"';
-    const ps = { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+    const ps = { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } };
     const cabecera = (fila) => { fila.font = { bold: true, color: { argb: "FFFFFFFF" } }; fila.eachCell((c) => { c.fill = fill("FF1F3A5F"); c.alignment = { vertical: "middle", horizontal: "center", wrapText: true }; }); fila.height = 30; };
     const lista = statsClientes().filter((s) => s.visitas).sort((a, b) => a.c.nombre.localeCompare(b.c.nombre, "es"));
     const titulo = `${CA_MESOS[mes.getMonth()]} ${mes.getFullYear()}`;
+    const nDies = new Date(mes.getFullYear(), mes.getMonth() + 1, 0).getDate();
+    const diaDe = (t) => deYmd(t.fecha).getDate();
+
+    // ---- Calendari: una fila por casa, una columna por día del mes, con las horas de cada día
+    const cal = wb.addWorksheet("Calendari", { pageSetup: ps, views: [{ state: "frozen", xSplit: 1, ySplit: 3, showGridLines: false }] });
+    const fino = { style: "thin", color: { argb: "FFBFC5CE" } };
+    const vora = { top: fino, left: fino, bottom: fino, right: fino };
+    cal.columns = [{ width: 26 }, ...Array.from({ length: nDies }, () => ({ width: 5 })), { width: 8 }, { width: 9 }];
+    const cT = nDies + 2, cH = nDies + 3;
+    cal.mergeCells(1, 1, 1, cH);
+    cal.getCell(1, 1).value = `DIES QUE S'HA ANAT A CADA CASA · ${titulo}`;
+    cal.getCell(1, 1).font = { bold: true, size: 14 };
+    const INI = ["DL", "DT", "DC", "DJ", "DV", "DS", "DG"];
+    const finde = (d) => { const w = new Date(mes.getFullYear(), mes.getMonth(), d).getDay(); return w === 0 || w === 6; };
+    const r2c = cal.getRow(2), r3c = cal.getRow(3);
+    r2c.getCell(1).value = "CLIENT"; cal.mergeCells(2, 1, 3, 1);
+    r2c.getCell(cT).value = "VISITES"; cal.mergeCells(2, cT, 3, cT);
+    r2c.getCell(cH).value = "HORES"; cal.mergeCells(2, cH, 3, cH);
+    for (let d = 1; d <= nDies; d++) {
+      r2c.getCell(d + 1).value = d;
+      r3c.getCell(d + 1).value = INI[(new Date(mes.getFullYear(), mes.getMonth(), d).getDay() + 6) % 7];
+    }
+    [r2c, r3c].forEach((fila) => {
+      for (let c = 1; c <= cH; c++) {
+        const x = fila.getCell(c);
+        const fd = c >= 2 && c <= nDies + 1 && finde(c - 1);
+        x.fill = fill(fd ? "FF4A5F7F" : "FF1F3A5F");
+        x.font = { bold: true, size: fila === r3c ? 8 : 10, color: { argb: "FFFFFFFF" } };
+        x.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+        x.border = vora;
+      }
+    });
+    lista.forEach((s, i) => {
+      const r = 4 + i, row = cal.getRow(r);
+      const porDia = new Map();
+      s.lista.forEach((t) => porDia.set(diaDe(t), (porDia.get(diaDe(t)) || 0) + Number(t.minutos)));
+      row.getCell(1).value = s.c.nombre;
+      row.getCell(1).font = { bold: true, size: 10 };
+      for (let d = 1; d <= nDies; d++) {
+        const x = row.getCell(d + 1);
+        const m = porDia.get(d);
+        if (m) { x.value = m / 1440; x.fill = fill("FFB7DEA8"); x.font = { bold: true, size: 8 }; }
+        else if (finde(d)) x.fill = fill("FFEEF0F3");
+        else if (i % 2) x.fill = fill("FFF8F9FB");
+        x.numFmt = '[h]:mm;;""';
+        x.alignment = { horizontal: "center", vertical: "middle" };
+        x.border = vora;
+      }
+      const L = (c) => cal.getColumn(c).letter;
+      row.getCell(cT).value = { formula: `COUNT(${L(2)}${r}:${L(nDies + 1)}${r})`, result: porDia.size };
+      row.getCell(cH).value = { formula: `SUM(${L(2)}${r}:${L(nDies + 1)}${r})`, result: s.min / 1440 };
+      row.getCell(cH).numFmt = "[h]:mm";
+      [1, cT, cH].forEach((c) => { row.getCell(c).border = vora; if (i % 2) row.getCell(c).fill = fill("FFF8F9FB"); });
+      [cT, cH].forEach((c) => { row.getCell(c).alignment = { horizontal: "center", vertical: "middle" }; row.getCell(c).font = { bold: true }; });
+      row.height = 18;
+    });
+    const rT = 4 + lista.length, rowT = cal.getRow(rT);
+    rowT.getCell(1).value = "TOTAL";
+    for (let c = 2; c <= cH; c++) {
+      const L = cal.getColumn(c).letter;
+      const vals = lista.map((s) => (c === cT ? new Set(s.lista.map(diaDe)).size : c === cH ? s.min : s.lista.filter((t) => diaDe(t) === c - 1).reduce((a, t) => a + Number(t.minutos), 0)));
+      const suma = vals.reduce((a, b) => a + b, 0);
+      rowT.getCell(c).value = { formula: `SUM(${L}4:${L}${rT - 1})`, result: c === cT ? suma : suma / 1440 };
+      rowT.getCell(c).numFmt = c === cT ? "0" : c === cH ? "[h]:mm" : '[h]:mm;;""';
+      rowT.getCell(c).alignment = { horizontal: "center", vertical: "middle" };
+    }
+    for (let c = 1; c <= cH; c++) { const x = rowT.getCell(c); x.fill = fill("FFE3E7ED"); x.font = { bold: true, size: c > 1 && c <= nDies + 1 ? 8 : 10 }; x.border = { top: { style: "medium" }, bottom: fino, left: fino, right: fino }; }
+    rowT.height = 20;
+    cal.mergeCells(rT + 2, 1, rT + 2, cH);
+    cal.getCell(rT + 2, 1).value = "Cada casella verda és un dia que s'hi ha anat, amb les hores fetes aquell dia. En gris, dissabtes i diumenges.";
+    cal.getCell(rT + 2, 1).font = { italic: true, size: 9, color: { argb: "FF555F6D" } };
 
     const res = wb.addWorksheet("Resum", { pageSetup: ps, views: [{ state: "frozen", ySplit: 3 }] });
-    res.columns = [{ width: 30 }, { width: 10 }, { width: 10 }, { width: 16 }, { width: 36 }];
-    res.mergeCells("A1:E1"); res.getCell("A1").value = `HORES PER CLIENT · ${titulo}`; res.getCell("A1").font = { bold: true, size: 14 };
-    const cab = res.getRow(3); cab.values = ["CLIENT", "HORES", "VISITES", "COBRAT EN EFECTIU", "QUI HI HA ANAT"]; cabecera(cab);
+    res.columns = [{ width: 30 }, { width: 10 }, { width: 10 }, { width: 16 }, { width: 34 }, { width: 34 }];
+    res.mergeCells("A1:F1"); res.getCell("A1").value = `HORES PER CLIENT · ${titulo}`; res.getCell("A1").font = { bold: true, size: 14 };
+    const cab = res.getRow(3); cab.values = ["CLIENT", "HORES", "VISITES", "COBRAT EN EFECTIU", "DIES DEL MES", "QUI HI HA ANAT"]; cabecera(cab);
     lista.forEach((s, i) => {
-      const row = res.addRow([s.c.nombre, s.min / 1440, s.visitas, s.cobrado || null, [...s.gente].map((id) => nombreDe(estado.perfiles.find((p) => p.id === id))).join(", ")]);
+      const dies = [...new Set(s.lista.map(diaDe))].sort((a, b) => a - b).join(", ");
+      const row = res.addRow([s.c.nombre, s.min / 1440, s.visitas, s.cobrado || null, dies, [...s.gente].map((id) => nombreDe(estado.perfiles.find((p) => p.id === id))).join(", ")]);
+      row.getCell(5).alignment = { wrapText: true, vertical: "top" };
       if (i % 2) row.eachCell((c) => (c.fill = fill("FFF3F5F8")));
     });
     const ult = 3 + lista.length;
     const tMin = lista.reduce((x, s) => x + s.min, 0), tVis = lista.reduce((x, s) => x + s.visitas, 0), tCob = r2(lista.reduce((x, s) => x + s.cobrado, 0));
-    const tr = res.addRow(["TOTAL", { formula: `SUM(B4:B${ult})`, result: tMin / 1440 }, { formula: `SUM(C4:C${ult})`, result: tVis }, { formula: `SUM(D4:D${ult})`, result: tCob }, ""]);
+    const tr = res.addRow(["TOTAL", { formula: `SUM(B4:B${ult})`, result: tMin / 1440 }, { formula: `SUM(C4:C${ult})`, result: tVis }, { formula: `SUM(D4:D${ult})`, result: tCob }, "", ""]);
     tr.font = { bold: true }; tr.eachCell((c) => { c.fill = fill("FFE3E7ED"); c.border = { top: { style: "medium" } }; });
     res.getColumn(2).numFmt = "[h]:mm"; res.getColumn(3).alignment = { horizontal: "center" }; res.getColumn(4).numFmt = EUR;
 
     const det = wb.addWorksheet("Detall", { pageSetup: ps, views: [{ state: "frozen", ySplit: 1 }] });
-    det.columns = [{ width: 28 }, { width: 12 }, { width: 24 }, { width: 9 }, { width: 16 }];
-    const cab2 = det.getRow(1); cab2.values = ["CLIENT", "DATA", "TREBALLADORA", "HORES", "COBRAT EN EFECTIU"]; cabecera(cab2);
+    det.columns = [{ width: 28 }, { width: 12 }, { width: 12 }, { width: 24 }, { width: 9 }, { width: 16 }];
+    const cab2 = det.getRow(1); cab2.values = ["CLIENT", "DIA", "DATA", "TREBALLADORA", "HORES", "COBRAT EN EFECTIU"]; cabecera(cab2);
     lista.forEach((s) => {
-      s.lista.sort((a, b) => (a.fecha < b.fecha ? -1 : 1)).forEach((t) => {
-        det.addRow([s.c.nombre, fechaXls(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), t.minutos / 1440, Number(t.cobrado) || null]);
+      s.lista.slice().sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.id - b.id)).forEach((t) => {
+        det.addRow([s.c.nombre, CA_DIES[(deYmd(t.fecha).getDay() + 6) % 7], fechaXls(t.fecha), nombreDe(estado.perfiles.find((p) => p.id === t.usuario_id)), t.minutos / 1440, Number(t.cobrado) || null]);
       });
-      const sub = det.addRow([`TOTAL ${s.c.nombre}`, "", "", s.min / 1440, s.cobrado || null]);
+      const sub = det.addRow([`TOTAL ${s.c.nombre}`, "", "", "", s.min / 1440, s.cobrado || null]);
       sub.font = { bold: true }; sub.eachCell((c) => (c.fill = fill("FFE2EFD9")));
       det.addRow([]);
     });
-    det.getColumn(2).numFmt = "dd/mm/yyyy"; det.getColumn(4).numFmt = "[h]:mm"; det.getColumn(5).numFmt = EUR;
+    det.getColumn(3).numFmt = "dd/mm/yyyy"; det.getColumn(5).numFmt = "[h]:mm"; det.getColumn(6).numFmt = EUR;
 
     return { wb, nombre: `clients_${mes.getFullYear()}-${dd(mes.getMonth() + 1)}.xlsx` };
   }
