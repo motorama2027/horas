@@ -240,22 +240,24 @@
       const c = priv.get(p.id);
       p.horas_semanales = Number(c?.horas_semanales) || 0;
       p.precio_hora = Number(c?.precio_hora ?? 8);
+      p.se_queda_cobrado = !!c?.se_queda_cobrado;   // solo si se queda el efectivo se le descuenta
     });
     estado.perfiles = data;
-    if (estado.yo) { const yo = data.find((p) => p.id === estado.yo.id); if (yo) Object.assign(estado.yo, { horas_semanales: yo.horas_semanales, precio_hora: yo.precio_hora }); }
+    if (estado.yo) { const yo = data.find((p) => p.id === estado.yo.id); if (yo) Object.assign(estado.yo, { horas_semanales: yo.horas_semanales, precio_hora: yo.precio_hora, se_queda_cobrado: yo.se_queda_cobrado }); }
   }
 
   // Guarda una ficha: horas de contrato y precio por hora van a su tabla privada (solo master), el resto a «perfiles»
   async function guardarPerfil(id, v) {
-    const { horas_semanales, precio_hora, ...resto } = v;
+    const { horas_semanales, precio_hora, se_queda_cobrado, ...resto } = v;
     if (Object.keys(resto).length) {
       const { error } = await sb.from("perfiles").update(resto).eq("id", id);
       if (error) return error;
     }
-    if (horas_semanales !== undefined || precio_hora !== undefined) {
+    if (horas_semanales !== undefined || precio_hora !== undefined || se_queda_cobrado !== undefined) {
       const fila = { usuario_id: id };
       if (horas_semanales !== undefined) fila.horas_semanales = horas_semanales;
       if (precio_hora !== undefined) fila.precio_hora = precio_hora;
+      if (se_queda_cobrado !== undefined) fila.se_queda_cobrado = !!se_queda_cobrado;
       const { error } = await sb.from("contratos").upsert(fila, { onConflict: "usuario_id" });
       if (error) return error;
     }
@@ -288,7 +290,8 @@
   // Cuentas de la semana:
   //   horas extra = horas hechas − horas de contrato
   //   importe     = horas extra × precio por hora
-  //   a pagar     = importe − lo cobrado en las casas − anticipos
+  //   a pagar     = importe − anticipos − lo cobrado en las casas (esto último SOLO si esa persona se queda el efectivo;
+  //                 si lo entrega, no se le descuenta)
   function cuentas(minutos, p, cobrado = 0, anticipos = 0) {
     const horas = (Number(minutos) || 0) / 60;
     const contrato = Number(p.horas_semanales) || 0;
@@ -298,8 +301,10 @@
     const r2 = (x) => Math.round(x * 100) / 100;
     const bruto = r2(horas * precio);
     const importe = r2(extra * precio);
-    const descuentos = r2((Number(cobrado) || 0) + (Number(anticipos) || 0));
-    return { horas, contrato, precio, dif, extra, faltan: Math.max(0, -dif), bruto, importe, cobrado: Number(cobrado) || 0, anticipos: Number(anticipos) || 0, descuentos, apagar: r2(importe - descuentos) };
+    const seQueda = !!p.se_queda_cobrado;
+    const cob = Number(cobrado) || 0;
+    const descuentos = r2((seQueda ? cob : 0) + (Number(anticipos) || 0));
+    return { horas, contrato, precio, dif, extra, faltan: Math.max(0, -dif), bruto, importe, cobrado: cob, seQueda, entregado: seQueda ? 0 : cob, anticipos: Number(anticipos) || 0, descuentos, apagar: r2(importe - descuentos) };
   }
 
   async function cargarListaClientes() {
@@ -546,7 +551,7 @@
     $("#sem-pie").innerHTML = `
       <div><span class="etq">Horas hechas</span><span class="val num">${fmtH(c.horas)}</span><span class="sub">contrato ${fmtH(c.contrato)}</span></div>
       <div><span class="etq">${c.dif >= 0 ? "Horas extra" : "Faltan"}</span><span class="val num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(c.dif >= 0 ? c.extra : c.faltan)}</span><span class="sub">× ${eur(c.precio)} = ${eur(c.importe)}</span></div>
-      <div><span class="etq">Cobrado en casas</span><span class="val num">${eur(c.cobrado)}</span><span class="sub">esta semana</span></div>`;
+      <div><span class="etq">Cobrado en casas</span><span class="val num">${eur(c.cobrado)}</span><span class="sub">${c.seQueda ? "se lo queda · se descuenta" : "lo entrega · no se descuenta"}</span></div>`;
   }
 
   // ================================================================ FICHA PERSONAL
@@ -558,7 +563,8 @@
         <div><label for="f-apellidos">Apellidos</label><input id="f-apellidos" value="${esc(p.apellidos)}" ${ro}></div>
         ${admin ? `<div><label for="f-puesto">Puesto</label><input id="f-puesto" value="${esc(p.puesto)}"></div>
         <div><label for="f-horas">Horas de contrato por semana</label><input id="f-horas" type="number" min="0" max="80" step="0.5" value="${Number(p.horas_semanales)}"></div>
-        <div><label for="f-precio">Precio por hora (€)</label><input id="f-precio" type="number" min="0" max="200" step="0.5" value="${Number(p.precio_hora ?? 8)}"></div>` : ""}
+        <div><label for="f-precio">Precio por hora (€)</label><input id="f-precio" type="number" min="0" max="200" step="0.5" value="${Number(p.precio_hora ?? 8)}"></div>
+        <div class="ancho"><label class="check"><input id="f-queda" type="checkbox" ${p.se_queda_cobrado ? "checked" : ""}> Se queda el dinero que cobra en las casas <span class="muted">(se le descuenta de lo que hay que pagarle; si no está marcado, lo entrega y no se descuenta)</span></label></div>` : ""}
         ${admin ? `<div class="ancho"><label for="f-notas">Notas internas (solo las ve el master)</label><textarea id="f-notas">${esc(p.notas)}</textarea></div>` : ""}
       </div>`;
   }
@@ -568,6 +574,7 @@
       nombre: $("#f-nombre").value.trim(), apellidos: $("#f-apellidos").value.trim(),
       puesto: $("#f-puesto").value.trim(), horas_semanales: Number($("#f-horas").value) || 0,
       precio_hora: Number($("#f-precio").value) || 0,
+      se_queda_cobrado: $("#f-queda").checked,
       notas: $("#f-notas").value,
     });
     return v;
@@ -618,7 +625,7 @@
     await cargarPerfiles();
     const filas = estado.perfiles.map((p) => `
       <tr class="fila-click" data-id="${p.id}">
-        <td><b>${esc(nombreDe(p))}</b></td>
+        <td><b>${esc(nombreDe(p))}</b>${p.se_queda_cobrado ? '<div class="muted" style="font-size:.78rem">💶 se queda el efectivo</div>' : ""}</td>
         <td class="muted">${esc(p.usuario)}</td>
         <td>${esc(p.puesto) || '<span class="muted">—</span>'}</td>
         <td class="num">${fmtDec(p.horas_semanales)}</td>
@@ -1270,7 +1277,7 @@
 
     $("#inf-tabla").innerHTML = `<table>
       <thead><tr><th>Persona</th>${dias.map((d) => `<th class="num ${esFinde(d) ? "finde" : ""}">${diaCorto(d)}</th>`).join("")}
-        <th class="num">Total</th><th class="num">Contrato</th><th class="num">Extra</th><th class="num">€/hora</th><th class="num">Importe</th><th class="num">Cobrado + ant.</th><th class="num">A pagar</th></tr></thead>
+        <th class="num">Total</th><th class="num">Contrato</th><th class="num">Extra</th><th class="num">€/hora</th><th class="num">Importe</th><th class="num">Descuentos</th><th class="num">A pagar</th></tr></thead>
       <tbody>${filas.map((f) => f.html).join("") || `<tr><td colspan="15" class="vacio">No hay trabajadoras activas.</td></tr>`}</tbody>
       <tfoot><tr><td>Total</td>${totDia.map((m, i) => `<td class="num ${esFinde(dias[i]) ? "finde" : ""}">${fmtMin(m)}</td>`).join("")}
         <td class="num">${fmtH(T.horas)}</td><td class="num">${fmtH(T.contrato)}</td><td class="num dif-pos">${fmtH(T.extra)}</td><td></td>
@@ -1281,7 +1288,7 @@
     $("#inf-resumen").innerHTML = `
       <div class="dato"><div class="etq">Horas hechas</div><div class="val">${fmtH(T.horas)}</div><div class="sub">contrato ${fmtH(T.contrato)} · extra ${fmtH(T.extra)}</div></div>
       <div class="dato"><div class="etq">Importe horas extra</div><div class="val">${eur(T.importe)}</div><div class="sub">horas extra × precio de cada una</div></div>
-      <div class="dato"><div class="etq">Cobrado en casas + anticipos</div><div class="val">${eur(T.descuentos)}</div><div class="sub">se descuenta</div></div>
+      <div class="dato"><div class="etq">Descuentos</div><div class="val">${eur(T.descuentos)}</div><div class="sub">efectivo de quien se lo queda + anticipos</div></div>
       <div class="dato"><div class="etq">Total a pagar</div><div class="val">${eur(T.apagar)}</div><div class="sub">${sinApuntar.length ? "Sin apuntar: " + sinApuntar.map((p) => esc(p.nombre || p.usuario)).join(", ") : "todas han apuntado"}</div></div>`;
 
     // Fichas semanales
@@ -1316,9 +1323,10 @@
               <div><span>− Horas de contrato</span><b class="num">${fmtH(c.contrato)}</b></div>
               <div><span>= ${c.dif >= 0 ? "Horas extra" : "Faltan"}</span><b class="num ${c.dif >= 0 ? "dif-pos" : "dif-neg"}">${fmtH(c.dif >= 0 ? c.extra : c.faltan)}</b></div>
               <div><span>Importe (${num2(c.extra)} h × ${eur(c.precio)})</span><b class="num">${eur(c.importe)}</b></div>
-              ${cobros.map((t) => `<div class="desc"><span>− Cobrado en ${esc(nombreCliente(t))}</span><b class="num">${eur(t.cobrado)}</b></div>`).join("")}
+              ${c.seQueda ? cobros.map((t) => `<div class="desc"><span>− Cobrado en ${esc(nombreCliente(t))}</span><b class="num">${eur(t.cobrado)}</b></div>`).join("") : ""}
               ${ants.map((d) => `<div class="desc"><span>− ${esc(d.concepto || "Anticipo")}</span><b class="num">${eur(d.importe)}</b></div>`).join("")}
               <div class="total"><span>${c.apagar >= 0 ? "A pagar" : "A devolver"}</span><b class="num">${eur(Math.abs(c.apagar))}</b></div>
+              ${!c.seQueda && c.cobrado ? `<div class="muted" style="font-size:.85rem;margin-top:6px">Efectivo cobrado en casas: ${eur(c.cobrado)} · lo entrega, no se descuenta</div>` : ""}
             </div>
             <div class="no-imprimir ficha-extra">
               <h4>Anticipos y otros descuentos</h4>
@@ -1522,7 +1530,7 @@
         const set = (r, c, v, est = {}) => {
           const cell = ws.getCell(r, c);
           cell.value = v;
-          if (est.bold || est.color || est.size) cell.font = { bold: !!est.bold, size: est.size || 11, color: est.color ? { argb: est.color } : undefined };
+          if (est.bold || est.color || est.size || est.italic) cell.font = { bold: !!est.bold, italic: !!est.italic, size: est.size || 11, color: est.color ? { argb: est.color } : undefined };
           if (est.fill) cell.fill = fill(est.fill);
           if (est.caja) cell.border = caja;
           if (est.fmt) cell.numFmt = est.fmt;
@@ -1591,8 +1599,8 @@
           set(r, 10, { formula: `ROUND(MIN(${ws.getCell(rHores, 9).address}*24,${c.contrato})*${precioRef},2)`, result: Math.round(Math.min(c.horas, c.contrato) * c.precio * 100) / 100 }, { fmt: FMT_EUR });
           restas.push(ws.getCell(r, 10).address); r++;
         }
-        const cobros = sp.ls.filter((t) => Number(t.cobrado));
-        if (cobros.length || sp.ants.length) { set(r, 7, "COBRAT / ANTICIPS:", { bold: true }); r++; }
+        const cobros = c.seQueda ? sp.ls.filter((t) => Number(t.cobrado)) : [];   // si entrega el efectivo, no se descuenta
+        if (cobros.length || sp.ants.length) { set(r, 7, cobros.length ? "COBRAT / ANTICIPS:" : "ANTICIPS:", { bold: true }); r++; }
         cobros.forEach((t) => {
           ws.mergeCells(r, 7, r, 9); set(r, 7, nombreCliente(t).toUpperCase(), { al: "right" });
           set(r, 10, Number(t.cobrado), { fmt: FMT_EUR }); restas.push(ws.getCell(r, 10).address); r++;
@@ -1611,6 +1619,11 @@
         ws.mergeCells(r, 9, r, 10);
         set(r, 9, { formula: `ABS(${ws.getCell(rTotal, 9).address}${restas.length ? "-SUM(" + restas.join(",") + ")" : ""})`, result: Math.abs(c.apagar) }, { bold: true, fill: col.fuerte, fmt: FMT_EUR, al: "center", size: 12, color: "FFB3261E" });
         ws.getRow(r).height = 22;
+        if (!c.seQueda && c.cobrado) {
+          r += 2;
+          ws.mergeCells(r, 7, r, 9); set(r, 7, "EFECTIU COBRAT I ENTREGAT (no es descompta)", { al: "right", italic: true });
+          set(r, 10, c.cobrado, { fmt: FMT_EUR, italic: true });
+        }
         r += 2;
         set(r, 7, "OBSERVACIONS:", { bold: true });
         ws.mergeCells(r + 1, 7, r + 3, 10);

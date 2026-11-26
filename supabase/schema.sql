@@ -310,6 +310,7 @@ create table if not exists public.contratos (
   horas_semanales  numeric(5,2) not null default 0 check (horas_semanales >= 0)
 );
 alter table public.contratos add column if not exists precio_hora numeric(6,2) not null default 8;
+alter table public.contratos add column if not exists se_queda_cobrado boolean not null default false;
 alter table public.contratos enable row level security;
 drop policy if exists contratos_master on public.contratos;
 create policy contratos_master on public.contratos for all using (public.es_admin()) with check (public.es_admin());

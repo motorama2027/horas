@@ -347,3 +347,5 @@ tr.fila-amano:hover td { background: #ffe9c7; }
   .tabla-envoltura, .tarjeta { border-color: #bbb; break-inside: avoid; }
   th, td { padding: 5px 7px; }
 }
+label.check { display: flex; align-items: flex-start; gap: 8px; font-weight: 500; font-size: .9rem; color: var(--tinta, #1d2430); cursor: pointer; }
+label.check input { width: auto; margin-top: 3px; flex-shrink: 0; }
